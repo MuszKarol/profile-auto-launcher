@@ -1,0 +1,75 @@
+# "Dev Mode" — full development environment
+# Fields marked as {windows, linux, darwin} are picked per-platform at runtime.
+name: Dev
+description: Spin up the full dev environment (Docker, IDE, repos, dashboards)
+default: true
+
+steps:
+  # ── 1. Set environment for anything we launch below
+  - type: env
+    name: dev env vars
+    set:
+      ENVIRONMENT: development
+      PAL_SESSION: dev
+    unset:
+      - HTTP_PROXY
+
+  # ── 2. Kill distracting apps
+  - type: kill
+    name: close Slack
+    process:
+      windows: slack.exe
+      linux: slack
+      darwin: Slack
+
+  # ── 3. Start Docker (long-running, detached) then wait for it to be ready
+  - type: command
+    name: start docker
+    detach: true
+    run:
+      windows: ["powershell", "-NoProfile", "-Command", "Start-Process 'Docker Desktop'"]
+      linux:  ["systemctl", "--user", "start", "docker-desktop"]
+      darwin: ["open", "-a", "Docker"]
+
+  - type: wait
+    name: let docker warm up
+    seconds: 5
+
+  # ── 4. Launch IDE + terminal in parallel (consecutive `parallel: true` steps batch)
+  - type: app
+    name: VS Code
+    parallel: true
+    path:
+      windows: "%LOCALAPPDATA%\\Programs\\Microsoft VS Code\\Code.exe"
+      linux:   /usr/bin/code
+      darwin:  /Applications/Visual Studio Code.app/Contents/MacOS/Electron
+    args:
+      - "~/projects/main"
+
+  - type: app
+    name: Terminal
+    parallel: true
+    path:
+      windows: wt.exe
+      linux:   /usr/bin/gnome-terminal
+      darwin:  /System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal
+
+  # ── 5. Open the usual browser tabs (sequential, default)
+  - type: url
+    name: GitHub PRs
+    url: https://github.com/pulls/review-requested
+
+  - type: url
+    name: Linear
+    url: https://linear.app/inbox
+
+  - type: url
+    name: local dashboard
+    url: http://localhost:3000
+
+  # ── 6. Background blocking command — wait for it to finish before continuing
+  - type: command
+    name: pull latest main
+    detach: false
+    cwd: "~/projects/main"
+    run: ["git", "pull", "--ff-only", "origin", "main"]
