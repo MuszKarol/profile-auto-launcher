@@ -259,38 +259,81 @@ webview.
 
 ## 6. Install & run
 
-```bash
-# from the repo root
-python -m venv .venv && source .venv/bin/activate   # or .venv\Scripts\activate
-pip install -e .              # core
-pip install -e '.[full]'      # + pystray + pynput for tray & hotkey
+Both installers install the package with the full extras (tray + global
+hotkey), copy the bundled sample profiles into the user config dir, and
+register the launcher to start automatically when you log in.
 
-palaunch list                 # see discovered profiles
-palaunch run Dev              # run "Dev" profile
-palaunch pick                 # HUD picker
-palaunch tray                 # system tray + global hotkey
-palaunch where                # print config paths
+Prerequisite on either OS: **Python 3.10 or newer** on your PATH.
+
+### Linux
+
+```bash
+git clone https://github.com/MuszKarol/profile-auto-launcher.git
+cd profile-auto-launcher
+bash scripts/install-linux.sh             # default: XDG .desktop autostart
+# or
+bash scripts/install-linux.sh --systemd   # systemd user unit instead
+bash scripts/install-linux.sh --no-autostart   # skip autostart registration
+```
+
+What the script does:
+1. Runs `pip install --user --upgrade .[full]` (core + `pystray` + `pynput`).
+2. Copies `profiles/*.yaml` to `~/.config/profile-auto-launcher/profiles/`
+   (only files that don't already exist).
+3. Writes `~/.config/autostart/profile-auto-launcher.desktop` with
+   `Exec=<path-to>/palaunch tray` — the XDG standard honoured by GNOME, KDE,
+   XFCE, Cinnamon, etc. With `--systemd` it writes a user unit to
+   `~/.config/systemd/user/profile-auto-launcher.service` and runs
+   `systemctl --user enable --now` instead.
+
+Uninstall: `bash scripts/uninstall-linux.sh` (keeps your profiles).
+
+> **PATH note:** if you installed Python via your distro's package manager,
+> `pip install --user` puts `palaunch` in `~/.local/bin`. Make sure that
+> directory is on your `PATH` — most modern distros add it automatically.
+
+### Windows
+
+Open **PowerShell** (no admin needed) in the repo root:
+
+```powershell
+git clone https://github.com/MuszKarol/profile-auto-launcher.git
+cd profile-auto-launcher
+powershell -ExecutionPolicy Bypass -File scripts\install-windows.ps1
+# or skip the autostart shortcut:
+powershell -ExecutionPolicy Bypass -File scripts\install-windows.ps1 -NoAutostart
+```
+
+What the script does:
+1. Runs `python -m pip install --user --upgrade .[full]`.
+2. Copies `profiles\*.yaml` to `%APPDATA%\profile-auto-launcher\profiles\`.
+3. Creates **Profile Auto Launcher.lnk** in the user Startup folder
+   (`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup`) pointing at
+   `palaunch.exe tray`, window style *Minimized* — so it comes up in the tray
+   at sign-in with no console window.
+
+Uninstall: `powershell -ExecutionPolicy Bypass -File scripts\uninstall-windows.ps1`.
+
+> **PATH note:** if `palaunch` isn't on PATH after install, add the output of
+> `python -c "import site; print(site.USER_BASE)"` + `\Scripts` to your user
+> PATH. The installer prints the exact path if it has to fall back to it.
+
+### Everyday commands
+
+```bash
+palaunch list          # see discovered profiles
+palaunch run Dev       # run the "Dev" profile
+palaunch pick          # open the HUD picker (filter-as-you-type)
+palaunch tray          # run in system tray + listen for global hotkey
+palaunch where         # print config paths
 ```
 
 The launcher looks for profiles in `~/.config/profile-auto-launcher/profiles/`
-first, then falls back to `./profiles/` (handy for development). Drop the
-bundled `profiles/*.yaml` into the user config dir to make them persist.
+(or `%APPDATA%\profile-auto-launcher\profiles\` on Windows) first, then falls
+back to `./profiles/` in the repo (handy during development).
 
-### Autostart (Linux)
-
-```ini
-# ~/.config/autostart/profile-auto-launcher.desktop
-[Desktop Entry]
-Type=Application
-Exec=palaunch tray
-Name=Profile Auto Launcher
-X-GNOME-Autostart-enabled=true
-```
-
-### Autostart (Windows)
-
-Create a shortcut to `palaunch.exe tray` in
-`shell:startup` (`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup`).
+Global hotkey defaults to `Alt+Space`; override with the `PAL_HOTKEY` env var
+(e.g. `PAL_HOTKEY='<super>+<shift>+p'`).
 
 ---
 
