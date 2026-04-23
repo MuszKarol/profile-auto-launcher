@@ -1,0 +1,28 @@
+name: Work
+description: Meetings, email, chat — no IDE
+
+steps:
+  - type: env
+    name: work env
+    set:
+      PAL_SESSION: work
+
+  - type: app
+    name: Slack
+    parallel: true
+    path:
+      windows: "%LOCALAPPDATA%\\slack\\slack.exe"
+      linux:   /usr/bin/slack
+      darwin:  /Applications/Slack.app/Contents/MacOS/Slack
+
+  - type: app
+    name: Calendar
+    parallel: true
+    path:
+      windows: "%LOCALAPPDATA%\\Programs\\Microsoft\\Outlook\\OUTLOOK.EXE"
+      linux:   /usr/bin/thunderbird
+      darwin:  /System/Applications/Calendar.app/Contents/MacOS/Calendar
+
+  - type: url
+    name: inbox
+    url: https://mail.google.com

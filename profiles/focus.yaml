@@ -1,0 +1,26 @@
+name: Focus
+description: Silence notifications and keep only writing tools open
+
+steps:
+  - type: kill
+    name: close Slack
+    process:
+      windows: slack.exe
+      linux: slack
+      darwin: Slack
+
+  - type: kill
+    name: close Discord
+    process:
+      windows: Discord.exe
+      linux: Discord
+      darwin: Discord
+
+  - type: env
+    set:
+      PAL_SESSION: focus
+      DO_NOT_DISTURB: "1"
+
+  - type: url
+    name: writing doc
+    url: https://notion.so
