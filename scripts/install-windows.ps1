@@ -71,8 +71,11 @@ if ($currentPath -notlike "*$userScripts*") {
     Write-Host "    Restart your terminal for the change to take effect."
 }
 
-# Copy sample profiles into %APPDATA%\profile-auto-launcher\profiles (skip if already present).
-$profilesDir = Join-Path $env:APPDATA "profile-auto-launcher\profiles"
+# Copy sample profiles into the config dir the app actually reads
+# (platformdirs resolves to %LOCALAPPDATA%\profile-auto-launcher on Windows,
+# NOT %APPDATA% — hardcoding Roaming here left the profiles undiscovered).
+$configDir   = & $python.Source -c "import platformdirs; print(platformdirs.user_config_dir('profile-auto-launcher', appauthor=False))"
+$profilesDir = Join-Path $configDir "profiles"
 New-Item -ItemType Directory -Force -Path $profilesDir | Out-Null
 Get-ChildItem -Path (Join-Path $repoDir "profiles") -Filter "*.yaml" | ForEach-Object {
     $dest = Join-Path $profilesDir $_.Name
