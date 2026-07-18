@@ -33,9 +33,13 @@ steps:
       linux:  ["systemctl", "--user", "start", "docker-desktop"]
       darwin: ["open", "-a", "Docker"]
 
-  - type: wait
-    name: let docker warm up
-    seconds: 5
+  # Poll `docker info` until the daemon actually answers (better than a blind sleep)
+  - type: wait_for
+    name: docker ready
+    run: ["docker", "info"]
+    timeout: 60
+    interval: 2
+    optional: true   # don't fail the profile on machines without docker
 
   # ── 4. Launch IDE + terminal in parallel (consecutive `parallel: true` steps batch)
   - type: app

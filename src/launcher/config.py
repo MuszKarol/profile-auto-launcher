@@ -14,7 +14,8 @@ from platformdirs import user_config_dir
 APP_NAME = "profile-auto-launcher"
 PLATFORM = platform.system().lower()  # 'windows', 'linux', 'darwin'
 
-KNOWN_STEP_TYPES = frozenset({"app", "command", "url", "env", "kill", "wait"})
+KNOWN_STEP_TYPES = frozenset({"app", "command", "url", "env", "kill", "wait", "wait_for"})
+KNOWN_WHEN_KEYS = frozenset({"platform", "exists", "not_exists", "env", "weekday"})
 
 
 def config_dir() -> Path:
@@ -45,8 +46,11 @@ class Step:
     parallel: bool = False  # run concurrently with adjacent parallel steps
     enabled: bool = True  # disabled steps are skipped (kept in output as SKIP)
     optional: bool = False  # failure doesn't count towards the profile result
-    timeout: float | None = None  # seconds; only meaningful for blocking commands
+    timeout: float | None = None  # seconds; blocking commands and wait_for budget
     retries: int = 0  # extra attempts after a failure
+    when: dict[str, Any] | None = None  # skip the step unless all conditions hold
+    # type=wait_for
+    interval: float = 1.0  # poll interval in seconds
     # type=url
     url: str | None = None
     # type=wait
@@ -70,6 +74,7 @@ class Profile:
     description: str = ""
     icon: str = ""  # short glyph/emoji shown in the HUD and tray
     default: bool = False
+    autostart: bool = False  # `palaunch tray` runs this profile once at startup
     tags: list[str] = field(default_factory=list)
     steps: list[Step] = field(default_factory=list)
     source_path: Path | None = None
@@ -94,21 +99,70 @@ def _coerce_step(raw: dict[str, Any]) -> Step:
     raw_timeout = raw.get("timeout")
     step.timeout = float(raw_timeout) if raw_timeout is not None else None
     step.seconds = float(raw.get("seconds", 0.0))
+    step.interval = max(0.1, float(raw.get("interval", 1.0)))
+    raw_when = raw.get("when")
+    if raw_when is not None:
+        if not isinstance(raw_when, dict):
+            raise ValueError("'when' must be a mapping of conditions")
+        unknown = set(raw_when) - KNOWN_WHEN_KEYS
+        if unknown:
+            raise ValueError(
+                f"unknown 'when' keys {sorted(unknown)}; allowed: {sorted(KNOWN_WHEN_KEYS)}"
+            )
+        step.when = raw_when
     raw_set = raw.get("set") or {}
     step.set = {str(k): str(v) for k, v in raw_set.items()}
     step.unset = [str(k) for k in (raw.get("unset") or [])]
     return step
 
 
-def load_profile(path: Path) -> Profile:
+def _read_raw(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as fh:
-        data = yaml.safe_load(fh) or {}
+        return yaml.safe_load(fh) or {}
+
+
+def _find_parent_file(name: str, start_dir: Path) -> Path | None:
+    for base in (start_dir, profiles_dir()):
+        for ext in (".yaml", ".yml"):
+            candidate = base / f"{name}{ext}"
+            if candidate.is_file():
+                return candidate
+    return None
+
+
+def _resolve_extends(data: dict[str, Any], directory: Path, seen: set[Path]) -> dict[str, Any]:
+    """Merge `extends: <file-stem>` chains: parent steps run first, child
+    scalar fields win. `default` and `autostart` are never inherited — a child
+    must opt in explicitly, otherwise one parent flag would fan out to every
+    derived profile."""
+    parent_name = data.get("extends")
+    if not parent_name:
+        return data
+    parent_path = _find_parent_file(str(parent_name), directory)
+    if parent_path is None:
+        raise ValueError(f"extends: profile file '{parent_name}' not found")
+    resolved = parent_path.resolve()
+    if resolved in seen:
+        raise ValueError(f"extends: cycle detected at '{parent_name}'")
+    seen.add(resolved)
+    parent = _resolve_extends(_read_raw(parent_path), parent_path.parent, seen)
+    # `name` isn't inherited either — two profiles with one name would shadow
+    # each other in discovery; a child without `name:` falls back to its stem.
+    merged = {k: v for k, v in parent.items() if k not in ("default", "autostart", "name")}
+    merged.update({k: v for k, v in data.items() if k not in ("steps", "extends")})
+    merged["steps"] = list(parent.get("steps") or []) + list(data.get("steps") or [])
+    return merged
+
+
+def load_profile(path: Path) -> Profile:
+    data = _resolve_extends(_read_raw(path), path.parent, {path.resolve()})
     steps = [_coerce_step(s) for s in data.get("steps", [])]
     return Profile(
         name=data.get("name") or path.stem,
         description=data.get("description", ""),
         icon=str(data.get("icon", "")),
         default=bool(data.get("default", False)),
+        autostart=bool(data.get("autostart", False)),
         tags=[str(t) for t in (data.get("tags") or [])],
         steps=steps,
         source_path=path,

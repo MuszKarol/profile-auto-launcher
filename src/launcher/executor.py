@@ -13,9 +13,13 @@ import re
 import shlex
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 import webbrowser
 from dataclasses import dataclass
-from typing import Iterable
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Iterable
 
 from launcher.config import PLATFORM, Profile, Step
 
@@ -166,6 +170,102 @@ async def _kill_process(step: Step, env: dict[str, str]) -> StepResult:
         return StepResult(step, False, str(exc))
 
 
+async def _probe_tcp(host: str, port: int) -> bool:
+    try:
+        _, writer = await asyncio.wait_for(asyncio.open_connection(host, port), 3.0)
+        writer.close()
+        return True
+    except (OSError, asyncio.TimeoutError):
+        return False
+
+
+def _probe_http(url: str) -> bool:
+    try:
+        with urllib.request.urlopen(url, timeout=3.0) as resp:
+            return resp.status < 500
+    except urllib.error.HTTPError as exc:
+        return exc.code < 500  # server answered — it's up, even if 4xx
+    except (urllib.error.URLError, OSError, ValueError):
+        return False
+
+
+async def _probe_command(argv: list[str], env: dict[str, str]) -> bool:
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *argv, env=env,
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+        )
+        return await proc.wait() == 0
+    except (OSError, FileNotFoundError):
+        return False
+
+
+async def _wait_for(step: Step, env: dict[str, str]) -> StepResult:
+    """Poll a tcp/http endpoint or a command until it's ready (or timeout)."""
+    target = _expand(step.url, env)
+    argv = [_expand(a, env) or a for a in _as_argv(step.run)]
+    if not target and not argv:
+        return StepResult(step, False, "wait_for needs url: or run:")
+
+    async def ready() -> bool:
+        if target:
+            scheme = target.split(":", 1)[0].lower()
+            if scheme == "tcp":
+                hostport = target[len("tcp://"):]
+                host, _, port = hostport.rpartition(":")
+                if not host or not port.isdigit():
+                    return False
+                return await _probe_tcp(host, int(port))
+            if scheme in ("http", "https"):
+                return await asyncio.to_thread(_probe_http, target)
+            return False
+        return await _probe_command(argv, env)
+
+    if target and target.split(":", 1)[0].lower() not in ("tcp", "http", "https"):
+        return StepResult(step, False, f"wait_for url must be tcp:// or http(s)://, got {target}")
+
+    budget = step.timeout or 30.0
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + budget
+    label = target or " ".join(argv)
+    while True:
+        if await ready():
+            return StepResult(step, True, f"{label} is ready")
+        if loop.time() >= deadline:
+            return StepResult(step, False, f"{label} not ready after {budget}s")
+        await asyncio.sleep(step.interval)
+
+
+_WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+
+
+def _as_list(value: Any) -> list[Any]:
+    return list(value) if isinstance(value, (list, tuple)) else [value]
+
+
+def when_matches(when: dict[str, Any], env: dict[str, str]) -> bool:
+    """All conditions must hold (AND). Unknown keys are rejected at load time."""
+    for key, expected in when.items():
+        if key == "platform":
+            if PLATFORM not in [str(v).lower() for v in _as_list(expected)]:
+                return False
+        elif key == "exists":
+            if not all(Path(_expand(str(p), env) or "").exists() for p in _as_list(expected)):
+                return False
+        elif key == "not_exists":
+            if any(Path(_expand(str(p), env) or "").exists() for p in _as_list(expected)):
+                return False
+        elif key == "env":
+            for k, v in dict(expected).items():
+                if env.get(str(k)) != str(v):
+                    return False
+        elif key == "weekday":
+            today = _WEEKDAYS[datetime.now().weekday()]
+            if today not in [str(v)[:3].lower() for v in _as_list(expected)]:
+                return False
+    return True
+
+
 def _spawn(argv: list[str], *, env: dict[str, str], cwd: str | None, detach: bool) -> None:
     """Launch a process fully detached so it outlives the launcher."""
     kwargs: dict = {"env": env, "cwd": cwd, "close_fds": True}
@@ -188,12 +288,15 @@ DISPATCH = {
     "url": _open_url,
     "env": _apply_env,
     "kill": _kill_process,
+    "wait_for": _wait_for,
 }
 
 
 async def _run_step(step: Step, env: dict[str, str]) -> StepResult:
     if not step.enabled:
         return StepResult(step, True, "disabled", skipped=True)
+    if step.when is not None and not when_matches(step.when, env):
+        return StepResult(step, True, "condition not met", skipped=True)
     handler = DISPATCH.get(step.type)
     if handler is None:
         return StepResult(step, False, f"unknown step type: {step.type}")
@@ -223,6 +326,9 @@ def describe_step(step: Step) -> str:
         return f"kill process {step.process}"
     if step.type == "wait":
         return f"sleep {step.seconds}s"
+    if step.type == "wait_for":
+        target = step.url or (step.run if isinstance(step.run, str) else " ".join(_as_argv(step.run)))
+        return f"poll {target} until ready (≤{step.timeout or 30.0}s)"
     return f"unknown step type {step.type!r}"
 
 
@@ -231,6 +337,8 @@ def dry_run_profile(profile: Profile) -> list[StepResult]:
     results = []
     for step in profile.steps:
         detail = describe_step(step)
+        if step.when:
+            detail += f" [when: {step.when}]"
         if not step.enabled:
             results.append(StepResult(step, True, f"disabled — would {detail}", skipped=True))
         else:
@@ -253,7 +361,9 @@ async def run_profile_async(profile: Profile, on_result=None) -> list[StepResult
         batch.clear()
 
     for step in profile.steps:
-        if step.type == "wait" and step.enabled:
+        if step.type == "wait" and step.enabled and (
+            step.when is None or when_matches(step.when, env)
+        ):
             await drain()
             await asyncio.sleep(step.seconds)
             res = StepResult(step, True, f"waited {step.seconds}s")
@@ -281,7 +391,11 @@ def run_profile(profile: Profile, on_result=None) -> list[StepResult]:
     drive a loop that was already running, so it was dead code masquerading
     as a safety net.
     """
-    return asyncio.run(run_profile_async(profile, on_result))
+    from launcher.state import record_run
+
+    results = asyncio.run(run_profile_async(profile, on_result))
+    record_run(profile.name)
+    return results
 
 
 def format_result(res: StepResult) -> str:

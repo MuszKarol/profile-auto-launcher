@@ -19,6 +19,7 @@ from launcher.config import (
     profiles_dir,
 )
 from launcher.executor import dry_run_profile, format_result, run_profile
+from launcher.notify import notify
 
 _NEW_PROFILE_TEMPLATE = """\
 name: {name}
@@ -59,6 +60,11 @@ def _execute(profile: Profile, dry_run: bool = False) -> int:
     print(f"▶ running profile: {profile.name}")
     results = run_profile(profile, on_result=lambda r: print(format_result(r)))
     failed = sum(1 for r in results if r.counts_as_failure)
+    ok = len(results) - failed
+    if failed == 0:
+        notify(f"{profile.name} — profile finished", f"✓ all {ok} steps succeeded")
+    else:
+        notify(f"{profile.name} — profile finished with errors", f"{ok} ok, {failed} failed")
     return 0 if failed == 0 else 1
 
 
@@ -156,6 +162,20 @@ def _cmd_edit(args: argparse.Namespace) -> int:
     return _open_in_editor(profile.source_path)
 
 
+def _cmd_last(args: argparse.Namespace) -> int:
+    from launcher.state import load_state
+
+    name = load_state().get("last_profile")
+    if not name:
+        print("No recorded runs yet — run a profile first.", file=sys.stderr)
+        return 1
+    profile = find_profile(name)
+    if profile is None:
+        print(f"Last-run profile '{name}' no longer exists.", file=sys.stderr)
+        return 2
+    return _execute(profile, dry_run=args.dry_run)
+
+
 def _cmd_pick(_args: argparse.Namespace) -> int:
     from launcher.hud import pick_and_run
 
@@ -180,9 +200,18 @@ def _cmd_tray(_args: argparse.Namespace) -> int:
         results = run_profile(p, on_result=lambda r: print(format_result(r)))
         failed = sum(1 for r in results if r.counts_as_failure)
         print(f"✓ {p.name}: {len(results) - failed} ok, {failed} failed")
+        status = "✓ all steps succeeded" if failed == 0 else f"✗ {failed} step(s) failed"
+        notify(f"{p.name} — profile finished", status)
 
     def open_hud() -> None:
         pick_and_run(discover_profiles())
+
+    auto = next((p for p in profiles if p.autostart), None)
+    if auto is not None:
+        print(f"▶ autostart profile: {auto.name}")
+        import threading
+
+        threading.Thread(target=execute, args=(auto,), daemon=True).start()
 
     run_hotkey(open_hud)
     run_tray(profiles, execute, open_hud)
@@ -208,6 +237,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print what each step would do without executing anything",
     )
     run_p.set_defaults(func=_cmd_run)
+
+    last_p = sub.add_parser("last", help="Re-run the most recently run profile")
+    last_p.add_argument("--dry-run", action="store_true", help="Describe instead of executing")
+    last_p.set_defaults(func=_cmd_last)
 
     sub.add_parser(
         "validate", help="Check every profile YAML for schema errors"
