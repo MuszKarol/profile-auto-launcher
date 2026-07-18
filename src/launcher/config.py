@@ -90,7 +90,8 @@ def _coerce_step(raw: dict[str, Any]) -> Step:
     for key in ("path", "run", "cwd", "url", "process"):
         if key in raw:
             setattr(step, key, step.resolve_platform_value(raw[key]))
-    step.args = list(raw.get("args") or [])
+    raw_args = step.resolve_platform_value(raw.get("args"))
+    step.args = [str(a) for a in (raw_args or [])]
     step.detach = bool(raw.get("detach", True))
     step.parallel = bool(raw.get("parallel", False))
     step.enabled = bool(raw.get("enabled", True))

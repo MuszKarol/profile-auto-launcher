@@ -37,6 +37,32 @@ powershell -ExecutionPolicy Bypass -File scripts\install-windows.ps1
 Both scripts install the package, copy the sample profiles, and register
 the launcher to start at login.
 
+### Quick start: autostart + tray + hotkey
+
+The launcher's resident mode is `palaunch tray` — it puts an icon in the
+system tray (Windows), menu bar (macOS) or AppIndicator area (Linux) and
+listens for the global hotkey:
+
+| OS      | Autostart mechanism (created by the installer)                        |
+|---------|------------------------------------------------------------------------|
+| Windows | `Profile Auto Launcher.lnk` in the user Startup folder → `palaunch tray` |
+| Linux   | XDG `~/.config/autostart/*.desktop` (or `--systemd` user unit)          |
+| macOS   | LaunchAgent `~/Library/LaunchAgents/com.profile-auto-launcher.tray.plist` |
+
+Once the tray is running:
+
+- **`Alt+Space`** toggles the HUD — press once to open, press again (or `Esc`)
+  to close. Override the binding with `PAL_HOTKEY`, e.g.
+  `PAL_HOTKEY='<ctrl>+<alt>+p'`.
+- **Tray menu** (right-click the icon): every profile by name, "Open
+  Launcher…", "Quit".
+- A profile marked `autostart: true` runs automatically when the tray starts —
+  i.e. right after you log in.
+
+> Linux tray note: pystray needs an AppIndicator/GTK backend on some desktops —
+> e.g. `sudo apt install gir1.2-appindicator3-0.1` on GNOME (plus the
+> AppIndicator extension) or nothing extra on KDE/XFCE.
+
 ```bash
 # 3. Try it immediately
 palaunch list             # see available profiles
@@ -49,10 +75,13 @@ palaunch edit Dev         # open a profile in your editor
 palaunch validate         # check every profile YAML for schema errors
 ```
 
-Your profiles live in `~/.config/profile-auto-launcher/profiles/`
-(Linux/macOS) or `%APPDATA%\profile-auto-launcher\profiles\` (Windows).
-Edit the bundled `dev.yaml` / `work.yaml` / `focus.yaml` to match your
-workflow, then call `palaunch run <name>`.
+Your profiles live in `~/.config/profile-auto-launcher/profiles/` (Linux),
+`~/Library/Application Support/profile-auto-launcher/profiles/` (macOS) or
+`%APPDATA%\profile-auto-launcher\profiles\` (Windows). Edit the bundled
+`dev.yaml` / `work.yaml` / `focus.yaml` / `gaming.yaml` to match your
+workflow, then call `palaunch run <name>`. Desktop apps in the samples are
+marked `optional: true`, so a machine without e.g. Steam or Zoom just skips
+them instead of failing the profile.
 
 ---
 
@@ -185,7 +214,7 @@ steps:                 # ordered list
     # type=app / command —----------------------------------------
     path: string | {windows,linux,darwin}   # app only
     run:  list | string | {windows,linux,darwin}   # command only
-    args: [string]                          # app only
+    args: [string] | {windows,linux,darwin}   # app only
     cwd:  string
     detach: bool                # true = launch-and-forget (default)
     # type=url —--------------------------------------------------

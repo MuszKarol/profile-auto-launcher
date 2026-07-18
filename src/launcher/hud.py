@@ -71,6 +71,10 @@ class _Hud:
         state = load_state()
         self.last_profile: str | None = state.get("last_profile")
         self.run_counts: dict[str, int] = state.get("run_counts", {})
+        # Cross-thread close request (e.g. the global hotkey toggling the HUD
+        # from the pynput listener thread — Tk itself is not thread-safe, so
+        # the flag is polled from inside the Tk loop instead).
+        self._close_event = threading.Event()
         self.results_q: "queue.Queue[StepResult | None]" = queue.Queue()
 
         self.root = tk.Tk()
@@ -92,7 +96,22 @@ class _Hud:
         self.outer.pack(fill="both", expand=True, padx=1, pady=1)
 
         self._build_picker()
+        self.root.after(100, self._watch_close)
         self.root.deiconify()
+
+    def request_close(self) -> None:
+        """Thread-safe close request; honoured within ~100 ms."""
+        self._close_event.set()
+
+    def _watch_close(self) -> None:
+        if self._close_event.is_set():
+            try:
+                self.root.destroy()
+            except tk.TclError:
+                pass
+            return
+        if self.root.winfo_exists():
+            self.root.after(100, self._watch_close)
 
     # ── picker view ──────────────────────────────────────────────────────
     def _build_picker(self) -> None:
@@ -343,16 +362,37 @@ class _Hud:
         self.root.mainloop()
 
 
+_active_lock = threading.Lock()
+_active_hud: _Hud | None = None
+
+
 def pick_and_run(profiles: list[Profile]) -> int:
     """Open the HUD; on Enter, execute the profile with live step feedback.
 
     Returns a process exit code (0 = success / cancelled, 1 = failed steps).
     """
+    global _active_hud
     if not profiles:
         return 1
     hud = _Hud(profiles, execute=True)
-    hud.run()
+    with _active_lock:
+        _active_hud = hud
+    try:
+        hud.run()
+    finally:
+        with _active_lock:
+            _active_hud = None
     return hud.exit_code
+
+
+def toggle_pick_and_run(profiles: list[Profile]) -> int:
+    """Hotkey entry point: open the HUD, or close it if it's already open."""
+    with _active_lock:
+        hud = _active_hud
+    if hud is not None:
+        hud.request_close()
+        return 0
+    return pick_and_run(profiles)
 
 
 def pick_profile(
