@@ -91,7 +91,9 @@ workflow, then call `palaunch run <name>`.
 | `launcher.hud`         | Tk-based HUD picker — stdlib only, no extra deps         |
 | `launcher.tray`        | Optional system tray (pystray/Pillow)                    |
 | `launcher.hotkey`      | Optional global hotkey listener (pynput)                 |
-| `launcher.cli`         | `palaunch list|run|pick|tray|new|edit|validate|where`     |
+| `launcher.state`       | Run history (`state.json`) for `last` + HUD recency      |
+| `launcher.notify`      | Native desktop notifications (toast/osascript/notify-send)|
+| `launcher.cli`         | `palaunch list|run|last|pick|tray|new|edit|validate|where`|
 
 ### Execution model
 
@@ -137,11 +139,16 @@ workflow, then call `palaunch run <name>`.
 - [x] Retry/timeout per step (`retries`, `timeout`)
 - [x] `optional: true` steps (failure doesn't fail the profile), `enabled: false` toggles
 - [x] `palaunch run --dry-run`, `palaunch validate`, `palaunch new`, `palaunch edit`
+- [x] Conditional steps (`when: {platform, exists, env, weekday}`)
+- [x] Health checks (`wait_for` — poll tcp/http endpoint or command until ready)
+- [x] Run history: `palaunch last` re-runs the previous profile, HUD floats
+      the last-run profile to the top (`↺ recent`)
+- [x] Native desktop notification when a profile finishes (disable: `PAL_NOTIFY=0`)
+- [x] Profile inheritance (`extends: <file-stem>`)
+- [x] `autostart: true` — tray runs that profile once at login
 - [ ] Profile editor UI
 
 ### P2 — later
-- [ ] Conditional steps (`when: profile == 'dev' and $(git status) == clean`)
-- [ ] Health checks ("wait until `curl localhost:5432` succeeds")
 - [ ] Secret storage (macOS Keychain / Win Credential Manager / libsecret)
 - [ ] Plugin system (`type: plugin`, external executables)
 - [ ] Cloud sync of profiles across machines
@@ -156,15 +163,25 @@ description: string    # shown in the HUD
 icon: string           # emoji/glyph shown in the HUD and tray menu
 tags: [string]         # extra keywords the HUD fuzzy filter matches
 default: bool          # run this if no name is passed to `palaunch run`
+autostart: bool        # `palaunch tray` runs this profile once at startup/login
+extends: string        # inherit another profile file (by stem): its steps run
+                       # first, scalar fields are overridden by this file;
+                       # `default`/`autostart`/`name` are never inherited
 
 steps:                 # ordered list
-  - type: app | command | url | env | kill | wait
+  - type: app | command | url | env | kill | wait | wait_for
     name: string               # optional label for logs
     parallel: bool             # batch with adjacent parallel steps
     enabled: bool              # false = skip the step (kept in output as SKP)
     optional: bool             # true = failure doesn't fail the profile
-    timeout: float             # seconds; kill a blocking command that overruns
+    timeout: float             # seconds; blocking commands + wait_for budget
     retries: int               # extra attempts after a failure
+    when:                      # skip unless ALL conditions hold (AND)
+      platform: windows | linux | darwin | [list]
+      exists: path | [paths]         # file/dir must exist
+      not_exists: path | [paths]
+      env: { KEY: value }            # env var equals
+      weekday: mon…sun | [list]
     # type=app / command —----------------------------------------
     path: string | {windows,linux,darwin}   # app only
     run:  list | string | {windows,linux,darwin}   # command only
@@ -175,6 +192,10 @@ steps:                 # ordered list
     url: string
     # type=wait —-------------------------------------------------
     seconds: float
+    # type=wait_for —---------------------------------------------
+    url: tcp://host:port | http(s)://…   # poll endpoint until it answers
+    run: [argv]                          # …or poll a command until exit 0
+    interval: float                      # poll every N seconds (default 1)
     # type=env —--------------------------------------------------
     set:   { KEY: value }
     unset: [KEY]
@@ -371,6 +392,7 @@ Uninstall: `powershell -ExecutionPolicy Bypass -File scripts\uninstall-windows.p
 palaunch list             # see discovered profiles (icon, step count, description)
 palaunch run Dev          # run the "Dev" profile
 palaunch run Dev --dry-run  # describe every step without executing
+palaunch last             # re-run whatever you ran last time
 palaunch pick             # open the HUD picker (fuzzy filter + live run progress)
 palaunch tray             # run in system tray + listen for global hotkey
 palaunch new Gaming       # scaffold ~/.config/…/profiles/gaming.yaml (--edit to open it)

@@ -13,6 +13,7 @@ from typing import Callable
 
 from launcher.config import Profile
 from launcher.executor import StepResult, format_result, run_profile
+from launcher.state import load_state
 
 # ── palette ──────────────────────────────────────────────────────────────
 BG = "#0e1117"          # window background
@@ -67,6 +68,9 @@ class _Hud:
         self.exit_code = 0
         self.failed_count = 0
         self.running = False
+        state = load_state()
+        self.last_profile: str | None = state.get("last_profile")
+        self.run_counts: dict[str, int] = state.get("run_counts", {})
         self.results_q: "queue.Queue[StepResult | None]" = queue.Queue()
 
         self.root = tk.Tk()
@@ -156,7 +160,14 @@ class _Hud:
             s = _match(q, p)
             if s is not None:
                 scored.append((s, p))
-        scored.sort(key=lambda sp: (-sp[0], sp[1].name.lower()))
+        scored.sort(
+            key=lambda sp: (
+                -sp[0],
+                sp[1].name != self.last_profile,  # last-run profile floats up
+                -self.run_counts.get(sp[1].name, 0),
+                sp[1].name.lower(),
+            )
+        )
         self.filtered = [p for _, p in scored]
         self.index = min(self.index, max(len(self.filtered) - 1, 0))
 
@@ -196,6 +207,8 @@ class _Hud:
             tk.Label(text, text=p.description, bg=PANEL, fg=MUTED, font=(FONT, 9), anchor="w").pack(fill="x")
 
         tk.Label(row, text=f"{len(p.steps)} steps", bg=PANEL, fg=MUTED, font=(FONT, 9)).pack(side="right")
+        if p.name == self.last_profile:
+            tk.Label(row, text="↺ recent", bg=PANEL, fg=ACCENT, font=(FONT, 9)).pack(side="right", padx=(0, 10))
 
         def set_bg(color: str) -> None:
             for widget in (row, text, *row.winfo_children(), *text.winfo_children()):
