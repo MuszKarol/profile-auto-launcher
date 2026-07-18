@@ -18,6 +18,44 @@ kills, and timed delays.
 
 ---
 
+## Quick start
+
+**Prerequisites:** Python 3.10+, Git.
+
+```bash
+# 1. Clone
+git clone https://github.com/MuszKarol/profile-auto-launcher.git
+cd profile-auto-launcher
+
+# 2. Install (Linux / macOS)
+bash scripts/install-linux.sh
+
+# 2. Install (Windows — PowerShell, no admin needed)
+powershell -ExecutionPolicy Bypass -File scripts\install-windows.ps1
+```
+
+Both scripts install the package, copy the sample profiles, and register
+the launcher to start at login.
+
+```bash
+# 3. Try it immediately
+palaunch list             # see available profiles
+palaunch run Dev          # run a profile by name
+palaunch run Dev --dry-run  # print what each step WOULD do, execute nothing
+palaunch pick             # open the filter-as-you-type HUD
+palaunch tray             # sit in the tray + listen for Alt+Space
+palaunch new Gaming       # scaffold a new profile YAML
+palaunch edit Dev         # open a profile in your editor
+palaunch validate         # check every profile YAML for schema errors
+```
+
+Your profiles live in `~/.config/profile-auto-launcher/profiles/`
+(Linux/macOS) or `%APPDATA%\profile-auto-launcher\profiles\` (Windows).
+Edit the bundled `dev.yaml` / `work.yaml` / `focus.yaml` to match your
+workflow, then call `palaunch run <name>`.
+
+---
+
 ## 1. System architecture
 
 ```
@@ -53,7 +91,7 @@ kills, and timed delays.
 | `launcher.hud`         | Tk-based HUD picker — stdlib only, no extra deps         |
 | `launcher.tray`        | Optional system tray (pystray/Pillow)                    |
 | `launcher.hotkey`      | Optional global hotkey listener (pynput)                 |
-| `launcher.cli`         | `palaunch list | run | pick | tray | where`              |
+| `launcher.cli`         | `palaunch list|run|pick|tray|new|edit|validate|where`     |
 
 ### Execution model
 
@@ -90,16 +128,19 @@ kills, and timed delays.
 - [x] CLI: `list / run / pick / tray / where`
 - [x] Graceful degradation when tray/hotkey deps are missing
 
-### P1 — next
-- [ ] System tray with profile menu (stub shipped; pystray optional dep)
-- [ ] Global hotkey `Alt+Space` opens HUD (stub shipped; pynput optional dep)
-- [ ] "Run on boot" installer for systemd / Windows Startup
-- [ ] Per-step success/failure overlay (toast-style)
+### P1 — shipped
+- [x] System tray with profile menu (pystray optional dep)
+- [x] Global hotkey `Alt+Space` opens HUD (pynput optional dep)
+- [x] "Run on boot" installer for systemd / Windows Startup
+- [x] Per-step success/failure view — the HUD streams live ✓/✗ results while
+      the profile runs, auto-closes on success, stays open on failure
+- [x] Retry/timeout per step (`retries`, `timeout`)
+- [x] `optional: true` steps (failure doesn't fail the profile), `enabled: false` toggles
+- [x] `palaunch run --dry-run`, `palaunch validate`, `palaunch new`, `palaunch edit`
 - [ ] Profile editor UI
 
 ### P2 — later
 - [ ] Conditional steps (`when: profile == 'dev' and $(git status) == clean`)
-- [ ] Retry/timeout per step
 - [ ] Health checks ("wait until `curl localhost:5432` succeeds")
 - [ ] Secret storage (macOS Keychain / Win Credential Manager / libsecret)
 - [ ] Plugin system (`type: plugin`, external executables)
@@ -112,12 +153,18 @@ kills, and timed delays.
 ```yaml
 name: string           # profile display name (required)
 description: string    # shown in the HUD
+icon: string           # emoji/glyph shown in the HUD and tray menu
+tags: [string]         # extra keywords the HUD fuzzy filter matches
 default: bool          # run this if no name is passed to `palaunch run`
 
 steps:                 # ordered list
   - type: app | command | url | env | kill | wait
     name: string               # optional label for logs
     parallel: bool             # batch with adjacent parallel steps
+    enabled: bool              # false = skip the step (kept in output as SKP)
+    optional: bool             # true = failure doesn't fail the profile
+    timeout: float             # seconds; kill a blocking command that overruns
+    retries: int               # extra attempts after a failure
     # type=app / command —----------------------------------------
     path: string | {windows,linux,darwin}   # app only
     run:  list | string | {windows,linux,darwin}   # command only
@@ -321,16 +368,23 @@ Uninstall: `powershell -ExecutionPolicy Bypass -File scripts\uninstall-windows.p
 ### Everyday commands
 
 ```bash
-palaunch list          # see discovered profiles
-palaunch run Dev       # run the "Dev" profile
-palaunch pick          # open the HUD picker (filter-as-you-type)
-palaunch tray          # run in system tray + listen for global hotkey
-palaunch where         # print config paths
+palaunch list             # see discovered profiles (icon, step count, description)
+palaunch run Dev          # run the "Dev" profile
+palaunch run Dev --dry-run  # describe every step without executing
+palaunch pick             # open the HUD picker (fuzzy filter + live run progress)
+palaunch tray             # run in system tray + listen for global hotkey
+palaunch new Gaming       # scaffold ~/.config/…/profiles/gaming.yaml (--edit to open it)
+palaunch edit Dev         # open a profile YAML in $EDITOR / OS default
+palaunch validate         # lint all profile YAMLs, non-zero exit on errors
+palaunch where            # print config paths
 ```
 
 The launcher looks for profiles in `~/.config/profile-auto-launcher/profiles/`
-(or `%APPDATA%\profile-auto-launcher\profiles\` on Windows) first, then falls
-back to `./profiles/` in the repo (handy during development).
+(or `%APPDATA%\profile-auto-launcher\profiles\` on Windows). For development
+inside the repo, set `PAL_INCLUDE_CWD=1` to additionally pick up `./profiles/`.
+This is opt-in by design — running `palaunch` in an unfamiliar directory that
+happens to contain `profiles/*.yaml` would otherwise execute whatever those
+files declare.
 
 Global hotkey defaults to `Alt+Space`; override with the `PAL_HOTKEY` env var
 (e.g. `PAL_HOTKEY='<super>+<shift>+p'`).

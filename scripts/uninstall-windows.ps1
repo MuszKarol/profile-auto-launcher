@@ -22,7 +22,7 @@ if (-not $python) { $python = Get-Command py -ErrorAction SilentlyContinue }
 if ($python) {
     & $python.Source -m pip uninstall -y profile-auto-launcher
 } else {
-    Write-Warning "Python not found on PATH — skipping pip uninstall."
+    Write-Warning "Python not found on PATH - skipping pip uninstall."
 }
 
 Write-Host ""

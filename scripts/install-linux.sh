@@ -58,6 +58,15 @@ if [ "$PY_OK" != "1" ]; then
 fi
 
 echo "==> Using Python $PY_VER"
+
+if ! python3 -m pip --version >/dev/null 2>&1; then
+    echo "==> pip not found — installing via ensurepip..."
+    python3 -m ensurepip --upgrade || {
+        echo "ERROR: ensurepip failed. Install pip manually: https://pip.pypa.io/en/stable/installation/" >&2
+        exit 1
+    }
+fi
+
 python3 -m pip install --user --upgrade "$REPO_DIR"'[full]'
 
 PALAUNCH_BIN="$(command -v palaunch || true)"
