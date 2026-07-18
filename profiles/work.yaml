@@ -1,5 +1,7 @@
 name: Work
 description: Meetings, email, chat — no IDE
+icon: "💼"
+tags: [meetings, email]
 
 steps:
   - type: env

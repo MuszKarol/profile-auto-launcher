@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -18,18 +19,40 @@ from typing import Iterable
 
 from launcher.config import PLATFORM, Profile, Step
 
+_POSIX_VAR = re.compile(r"\$(\w+|\{[^}]*\})")
+_WIN_VAR = re.compile(r"%([^%]+)%")
+
 
 @dataclass
 class StepResult:
     step: Step
     ok: bool
     detail: str = ""
+    skipped: bool = False
+
+    @property
+    def counts_as_failure(self) -> bool:
+        return not self.ok and not self.step.optional
 
 
 def _expand(value: str | None, env: dict[str, str]) -> str | None:
+    """Expand `~`, `$VAR`, `${VAR}`, and `%VAR%` against the *local* env dict.
+
+    `os.path.expandvars` reads `os.environ` directly, which would miss
+    mutations performed by earlier `env` steps in the same profile run.
+    """
     if value is None:
         return None
-    return os.path.expandvars(os.path.expanduser(value))
+    expanded = os.path.expanduser(value)
+
+    def posix_sub(match: re.Match[str]) -> str:
+        token = match.group(1)
+        name = token[1:-1] if token.startswith("{") and token.endswith("}") else token
+        return env.get(name, match.group(0))
+
+    expanded = _POSIX_VAR.sub(posix_sub, expanded)
+    expanded = _WIN_VAR.sub(lambda m: env.get(m.group(1), m.group(0)), expanded)
+    return expanded
 
 
 def _as_argv(run: list[str] | str | None) -> list[str]:
@@ -50,7 +73,7 @@ async def _launch_app(step: Step, env: dict[str, str]) -> StepResult:
         return StepResult(step, True, f"launched {path}")
     except FileNotFoundError:
         return StepResult(step, False, f"not found: {path}")
-    except Exception as exc:  # noqa: BLE001
+    except OSError as exc:
         return StepResult(step, False, str(exc))
 
 
@@ -67,27 +90,49 @@ async def _run_command(step: Step, env: dict[str, str]) -> StepResult:
             *argv,
             env=env,
             cwd=_expand(step.cwd, env),
-            stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        _, stderr = await proc.communicate()
+        try:
+            if step.timeout:
+                _, stderr = await asyncio.wait_for(proc.communicate(), step.timeout)
+            else:
+                _, stderr = await proc.communicate()
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return StepResult(step, False, f"timed out after {step.timeout}s")
         if proc.returncode == 0:
-            return StepResult(step, True, f"exit 0")
-        return StepResult(step, False, f"exit {proc.returncode}: {stderr.decode(errors='replace').strip()}")
+            return StepResult(step, True, "exit 0")
+        return StepResult(
+            step, False,
+            f"exit {proc.returncode}: {stderr.decode(errors='replace').strip()}",
+        )
     except FileNotFoundError:
         return StepResult(step, False, f"not found: {argv[0]}")
-    except Exception as exc:  # noqa: BLE001
+    except OSError as exc:
         return StepResult(step, False, str(exc))
 
 
 async def _open_url(step: Step, env: dict[str, str]) -> StepResult:
     if not step.url:
         return StepResult(step, False, "missing url")
+    if not _is_safe_url(step.url):
+        return StepResult(step, False, f"refused unsafe url scheme: {step.url}")
     try:
         webbrowser.open(step.url, new=2)
         return StepResult(step, True, step.url)
-    except Exception as exc:  # noqa: BLE001
+    except (OSError, webbrowser.Error) as exc:
         return StepResult(step, False, str(exc))
+
+
+_ALLOWED_URL_SCHEMES = frozenset({"http", "https", "mailto", "ftp", "ftps"})
+
+
+def _is_safe_url(url: str) -> bool:
+    """Reject schemes that webbrowser.open would happily resolve to local files
+    or shell-handled URIs (file://, javascript:, data:, custom protocols)."""
+    scheme = url.split(":", 1)[0].lower() if ":" in url else ""
+    return scheme in _ALLOWED_URL_SCHEMES
 
 
 async def _apply_env(step: Step, env: dict[str, str]) -> StepResult:
@@ -103,11 +148,21 @@ async def _kill_process(step: Step, env: dict[str, str]) -> StepResult:
         return StepResult(step, False, "missing process")
     try:
         if PLATFORM == "windows":
-            subprocess.run(["taskkill", "/F", "/IM", step.process], capture_output=True, check=False)
+            subprocess.run(
+                ["taskkill", "/F", "/IM", step.process],
+                capture_output=True, check=False,
+            )
         else:
-            subprocess.run(["pkill", "-f", step.process], capture_output=True, check=False)
+            # `-x` requires whole-name match; re.escape neuters regex metacharacters
+            # so a profile entry like `process: .` cannot accidentally match every
+            # 1-char process name. Without these flags, pkill's default substring +
+            # regex match against the full command line is alarmingly broad.
+            subprocess.run(
+                ["pkill", "-x", re.escape(step.process)],
+                capture_output=True, check=False,
+            )
         return StepResult(step, True, f"kill {step.process}")
-    except Exception as exc:  # noqa: BLE001
+    except OSError as exc:
         return StepResult(step, False, str(exc))
 
 
@@ -137,10 +192,50 @@ DISPATCH = {
 
 
 async def _run_step(step: Step, env: dict[str, str]) -> StepResult:
+    if not step.enabled:
+        return StepResult(step, True, "disabled", skipped=True)
     handler = DISPATCH.get(step.type)
     if handler is None:
         return StepResult(step, False, f"unknown step type: {step.type}")
-    return await handler(step, env)
+    result = await handler(step, env)
+    attempt = 0
+    while not result.ok and attempt < step.retries:
+        attempt += 1
+        result = await handler(step, env)
+        result.detail += f" (attempt {attempt + 1}/{step.retries + 1})"
+    return result
+
+
+def describe_step(step: Step) -> str:
+    """Human-readable one-liner of what a step *would* do (dry-run)."""
+    if step.type == "app":
+        args = " ".join(step.args)
+        return f"launch {step.path}" + (f" {args}" if args else "")
+    if step.type == "command":
+        argv = step.run if isinstance(step.run, str) else " ".join(_as_argv(step.run))
+        mode = "spawn" if step.detach else "run and wait for"
+        return f"{mode}: {argv}"
+    if step.type == "url":
+        return f"open {step.url}"
+    if step.type == "env":
+        return f"set {list(step.set)} / unset {step.unset}"
+    if step.type == "kill":
+        return f"kill process {step.process}"
+    if step.type == "wait":
+        return f"sleep {step.seconds}s"
+    return f"unknown step type {step.type!r}"
+
+
+def dry_run_profile(profile: Profile) -> list[StepResult]:
+    """Describe every step without executing anything."""
+    results = []
+    for step in profile.steps:
+        detail = describe_step(step)
+        if not step.enabled:
+            results.append(StepResult(step, True, f"disabled — would {detail}", skipped=True))
+        else:
+            results.append(StepResult(step, True, f"would {detail}"))
+    return results
 
 
 async def run_profile_async(profile: Profile, on_result=None) -> list[StepResult]:
@@ -158,7 +253,7 @@ async def run_profile_async(profile: Profile, on_result=None) -> list[StepResult
         batch.clear()
 
     for step in profile.steps:
-        if step.type == "wait":
+        if step.type == "wait" and step.enabled:
             await drain()
             await asyncio.sleep(step.seconds)
             res = StepResult(step, True, f"waited {step.seconds}s")
@@ -179,17 +274,23 @@ async def run_profile_async(profile: Profile, on_result=None) -> list[StepResult
 
 
 def run_profile(profile: Profile, on_result=None) -> list[StepResult]:
-    """Synchronous entry point — runs an asyncio loop internally."""
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(run_profile_async(profile, on_result))
-    # Already inside a loop (e.g. tkinter callback) — schedule and wait.
-    return asyncio.get_event_loop().run_until_complete(run_profile_async(profile, on_result))
+    """Synchronous entry point — runs an asyncio loop internally.
+
+    Must be called from a thread without a running event loop. The previous
+    fallback `get_event_loop().run_until_complete(...)` could not actually
+    drive a loop that was already running, so it was dead code masquerading
+    as a safety net.
+    """
+    return asyncio.run(run_profile_async(profile, on_result))
 
 
 def format_result(res: StepResult) -> str:
-    tag = "OK " if res.ok else "ERR"
+    if res.skipped:
+        tag = "SKP"
+    elif res.ok:
+        tag = "OK "
+    else:
+        tag = "err" if res.step.optional else "ERR"
     label = res.step.name or res.step.type
     return f"[{tag}] {res.step.type}: {label} — {res.detail}"
 

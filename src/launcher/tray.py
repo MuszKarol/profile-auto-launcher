@@ -26,7 +26,10 @@ def run_tray(profiles: list[Profile], on_run: Callable[[Profile], None], on_open
     def make_runner(p: Profile) -> Callable[[], None]:
         return lambda _icon=None, _item=None: threading.Thread(target=on_run, args=(p,), daemon=True).start()
 
-    items = [pystray.MenuItem(p.name, make_runner(p)) for p in profiles]
+    def label(p: Profile) -> str:
+        return f"{p.icon} {p.name}" if p.icon else p.name
+
+    items = [pystray.MenuItem(label(p), make_runner(p)) for p in profiles]
     menu = pystray.Menu(
         pystray.MenuItem("Open Launcher…", lambda _i, _it: threading.Thread(target=on_open_hud, daemon=True).start()),
         pystray.Menu.SEPARATOR,

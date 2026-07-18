@@ -1,5 +1,7 @@
 name: Focus
 description: Silence notifications and keep only writing tools open
+icon: "🎯"
+tags: [quiet, writing]
 
 steps:
   - type: kill

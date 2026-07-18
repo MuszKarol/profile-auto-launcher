@@ -36,24 +36,40 @@ if ($pyOk -ne '1') {
 }
 Write-Host "==> Using Python $pyVersion ($($python.Source))"
 
+$null = & $python.Source -m pip --version 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "==> pip not found - installing via ensurepip..."
+    & $python.Source -m ensurepip --upgrade
+    if ($LASTEXITCODE -ne 0) {
+        throw "ensurepip failed. Install pip manually: https://pip.pypa.io/en/stable/installation/"
+    }
+}
+
 & $python.Source -m pip install --user --upgrade "$repoDir[full]"
 if ($LASTEXITCODE -ne 0) { throw "pip install failed with exit $LASTEXITCODE" }
 
-# Locate palaunch.exe — prefer PATH, fall back to the user Scripts dir.
+# Locate palaunch.exe - prefer PATH, fall back to the user Scripts dir.
+$userScripts = & $python.Source -c "import sysconfig; print(sysconfig.get_path('scripts', 'nt_user'))"
 $palaunch = Get-Command palaunch -ErrorAction SilentlyContinue
 if ($palaunch) {
     $palaunchPath = $palaunch.Source
 } else {
-    $userBase  = & $python.Source -c "import site; print(site.USER_BASE)"
-    $candidate = Join-Path $userBase "Scripts\palaunch.exe"
+    $candidate = Join-Path $userScripts "palaunch.exe"
     if (Test-Path $candidate) {
         $palaunchPath = $candidate
-        Write-Warning "palaunch not on PATH. Add '$(Split-Path $candidate -Parent)' to your PATH."
     } else {
         throw "palaunch.exe not found after install. Expected at $candidate."
     }
 }
 Write-Host "==> palaunch binary: $palaunchPath"
+
+# Add the Scripts dir to the user PATH if not already present.
+$currentPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
+if ($currentPath -notlike "*$userScripts*") {
+    [Environment]::SetEnvironmentVariable('PATH', "$currentPath;$userScripts", 'User')
+    Write-Host "==> Added '$userScripts' to your user PATH."
+    Write-Host "    Restart your terminal for the change to take effect."
+}
 
 # Copy sample profiles into %APPDATA%\profile-auto-launcher\profiles (skip if already present).
 $profilesDir = Join-Path $env:APPDATA "profile-auto-launcher\profiles"
