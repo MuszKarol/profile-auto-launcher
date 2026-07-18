@@ -36,12 +36,22 @@ done
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
 
+OS_NAME="$(uname -s)"
+
 XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 AUTOSTART_DIR="$XDG_CONFIG_HOME/autostart"
 SYSTEMD_DIR="$XDG_CONFIG_HOME/systemd/user"
-PROFILES_DIR="$XDG_CONFIG_HOME/profile-auto-launcher/profiles"
 DESKTOP_FILE="$AUTOSTART_DIR/profile-auto-launcher.desktop"
 SYSTEMD_UNIT="$SYSTEMD_DIR/profile-auto-launcher.service"
+LAUNCH_AGENTS_DIR="$HOME/Library/LaunchAgents"
+LAUNCH_AGENT_PLIST="$LAUNCH_AGENTS_DIR/com.profile-auto-launcher.tray.plist"
+
+# platformdirs puts config under ~/Library/Application Support on macOS
+if [ "$OS_NAME" = "Darwin" ]; then
+    PROFILES_DIR="$HOME/Library/Application Support/profile-auto-launcher/profiles"
+else
+    PROFILES_DIR="$XDG_CONFIG_HOME/profile-auto-launcher/profiles"
+fi
 
 echo "==> Installing profile-auto-launcher from $REPO_DIR"
 
@@ -99,7 +109,30 @@ if [ "$ENABLE_AUTOSTART" = "0" ]; then
     exit 0
 fi
 
-if [ "$MODE" = "systemd" ]; then
+if [ "$OS_NAME" = "Darwin" ]; then
+    # macOS: LaunchAgent runs `palaunch tray` in the menu bar at login
+    mkdir -p "$LAUNCH_AGENTS_DIR"
+    cat > "$LAUNCH_AGENT_PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.profile-auto-launcher.tray</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$PALAUNCH_BIN</string>
+        <string>tray</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+</dict>
+</plist>
+EOF
+    launchctl unload "$LAUNCH_AGENT_PLIST" 2>/dev/null || true
+    launchctl load "$LAUNCH_AGENT_PLIST"
+    echo "==> LaunchAgent: $LAUNCH_AGENT_PLIST (loaded — menu-bar icon active)"
+elif [ "$MODE" = "systemd" ]; then
     mkdir -p "$SYSTEMD_DIR"
     cat > "$SYSTEMD_UNIT" <<EOF
 [Unit]

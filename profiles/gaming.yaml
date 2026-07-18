@@ -1,0 +1,41 @@
+name: Gaming
+description: Close work apps, fire up Steam and Discord
+icon: "🎮"
+tags: [steam, discord, fun]
+
+steps:
+  - type: kill
+    name: close Slack
+    process: { windows: slack.exe, linux: slack, darwin: Slack }
+
+  - type: kill
+    name: close Teams
+    process: { windows: ms-teams.exe, linux: teams, darwin: MSTeams }
+
+  - type: env
+    set:
+      PAL_SESSION: gaming
+
+  - type: app
+    name: Steam
+    parallel: true
+    optional: true
+    path:
+      windows: "C:\\Program Files (x86)\\Steam\\steam.exe"
+      linux:   /usr/bin/steam
+      darwin:  /Applications/Steam.app/Contents/MacOS/steam_osx
+
+  - type: app
+    name: Discord
+    parallel: true
+    optional: true
+    path:
+      windows: "%LOCALAPPDATA%\\Discord\\Update.exe"
+      linux:   /usr/bin/discord
+      darwin:  /Applications/Discord.app/Contents/MacOS/Discord
+    args:
+      windows: ["--processStart", "Discord.exe"]
+
+  - type: url
+    name: Twitch
+    url: https://www.twitch.tv/directory/following

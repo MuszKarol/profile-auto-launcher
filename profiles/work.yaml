@@ -1,7 +1,7 @@
 name: Work
-description: Meetings, email, chat — no IDE
+description: Mail, calendar, chat and the daily board — no IDE
 icon: "💼"
-tags: [meetings, email]
+tags: [meetings, email, chat]
 
 steps:
   - type: env
@@ -9,22 +9,29 @@ steps:
     set:
       PAL_SESSION: work
 
+  # Desktop apps are optional — the profile still succeeds on machines
+  # that don't have them installed (web tabs below cover the same tools).
   - type: app
-    name: Slack
+    name: Zoom
     parallel: true
+    optional: true
     path:
-      windows: "%LOCALAPPDATA%\\slack\\slack.exe"
-      linux:   /usr/bin/slack
-      darwin:  /Applications/Slack.app/Contents/MacOS/Slack
-
-  - type: app
-    name: Calendar
-    parallel: true
-    path:
-      windows: "%LOCALAPPDATA%\\Programs\\Microsoft\\Outlook\\OUTLOOK.EXE"
-      linux:   /usr/bin/thunderbird
-      darwin:  /System/Applications/Calendar.app/Contents/MacOS/Calendar
+      windows: "%APPDATA%\\Zoom\\bin\\Zoom.exe"
+      linux:   /usr/bin/zoom
+      darwin:  /Applications/zoom.us.app/Contents/MacOS/zoom.us
 
   - type: url
     name: inbox
     url: https://mail.google.com
+
+  - type: url
+    name: calendar
+    url: https://calendar.google.com
+
+  - type: url
+    name: team chat
+    url: https://app.slack.com/client
+
+  - type: url
+    name: task board
+    url: https://trello.com

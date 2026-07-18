@@ -1,27 +1,37 @@
 name: Focus
-description: Silence notifications and keep only writing tools open
+description: Kill distractions, lo-fi in the background, notes open
 icon: "🎯"
-tags: [quiet, writing]
+tags: [quiet, deep-work, notes]
 
 steps:
   - type: kill
     name: close Slack
-    process:
-      windows: slack.exe
-      linux: slack
-      darwin: Slack
+    process: { windows: slack.exe, linux: slack, darwin: Slack }
 
   - type: kill
     name: close Discord
-    process:
-      windows: Discord.exe
-      linux: Discord
-      darwin: Discord
+    process: { windows: Discord.exe, linux: Discord, darwin: Discord }
+
+  - type: kill
+    name: close Steam
+    process: { windows: steam.exe, linux: steam, darwin: steam_osx }
 
   - type: env
     set:
       PAL_SESSION: focus
       DO_NOT_DISTURB: "1"
+
+  - type: app
+    name: Obsidian notes
+    optional: true
+    path:
+      windows: "%LOCALAPPDATA%\\Obsidian\\Obsidian.exe"
+      linux:   /usr/bin/obsidian
+      darwin:  /Applications/Obsidian.app/Contents/MacOS/Obsidian
+
+  - type: url
+    name: lo-fi radio
+    url: https://www.youtube.com/watch?v=jfKfPfyJRdk
 
   - type: url
     name: writing doc

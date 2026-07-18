@@ -188,7 +188,7 @@ def _cmd_pick(_args: argparse.Namespace) -> int:
 
 def _cmd_tray(_args: argparse.Namespace) -> int:
     from launcher.hotkey import run_hotkey
-    from launcher.hud import pick_and_run
+    from launcher.hud import toggle_pick_and_run
     from launcher.tray import run_tray
 
     profiles = discover_profiles()
@@ -204,7 +204,8 @@ def _cmd_tray(_args: argparse.Namespace) -> int:
         notify(f"{p.name} — profile finished", status)
 
     def open_hud() -> None:
-        pick_and_run(discover_profiles())
+        # hotkey toggles: second Alt+Space press closes an already-open HUD
+        toggle_pick_and_run(discover_profiles())
 
     auto = next((p for p in profiles if p.autostart), None)
     if auto is not None:
