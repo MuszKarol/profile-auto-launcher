@@ -45,7 +45,7 @@ listens for the global hotkey:
 
 | OS      | Autostart mechanism (created by the installer)                        |
 |---------|------------------------------------------------------------------------|
-| Windows | `Profile Auto Launcher.lnk` in the user Startup folder → `palaunch tray` |
+| Windows | `Profile Auto Launcher.lnk` in the user Startup folder → `palaunchw tray` (no-console binary) |
 | Linux   | XDG `~/.config/autostart/*.desktop` (or `--systemd` user unit)          |
 | macOS   | LaunchAgent `~/Library/LaunchAgents/com.profile-auto-launcher.tray.plist` |
 
@@ -406,8 +406,9 @@ What the script does:
 2. Copies `profiles\*.yaml` to `%APPDATA%\profile-auto-launcher\profiles\`.
 3. Creates **Profile Auto Launcher.lnk** in the user Startup folder
    (`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup`) pointing at
-   `palaunch.exe tray`, window style *Minimized* — so it comes up in the tray
-   at sign-in with no console window.
+   `palaunchw.exe tray` — the windowed (no-console) binary — so it comes up
+   in the tray at sign-in with no console window. To start it by hand without
+   a console, use `palaunchw tray` too; `palaunch` keeps the console for CLI use.
 
 Uninstall: `powershell -ExecutionPolicy Bypass -File scripts\uninstall-windows.ps1`.
 
