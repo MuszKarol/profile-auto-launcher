@@ -26,6 +26,11 @@ from launcher.config import PLATFORM, Profile, Step
 _POSIX_VAR = re.compile(r"\$(\w+|\{[^}]*\})")
 _WIN_VAR = re.compile(r"%([^%]+)%")
 
+# When the launcher runs windowless (palaunchw / pythonw), a console child
+# spawned without this flag pops up its own console window. Inherited stdio
+# handles still work, so output capture is unaffected. 0 on non-Windows.
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
 
 @dataclass
 class StepResult:
@@ -95,6 +100,7 @@ async def _run_command(step: Step, env: dict[str, str]) -> StepResult:
             env=env,
             cwd=_expand(step.cwd, env),
             stderr=asyncio.subprocess.PIPE,
+            creationflags=_NO_WINDOW,
         )
         try:
             if step.timeout:
@@ -154,7 +160,7 @@ async def _kill_process(step: Step, env: dict[str, str]) -> StepResult:
         if PLATFORM == "windows":
             subprocess.run(
                 ["taskkill", "/F", "/IM", step.process],
-                capture_output=True, check=False,
+                capture_output=True, check=False, creationflags=_NO_WINDOW,
             )
         else:
             # `-x` requires whole-name match; re.escape neuters regex metacharacters
@@ -194,6 +200,7 @@ async def _probe_command(argv: list[str], env: dict[str, str]) -> bool:
         proc = await asyncio.create_subprocess_exec(
             *argv, env=env,
             stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+            creationflags=_NO_WINDOW,
         )
         return await proc.wait() == 0
     except (OSError, FileNotFoundError):

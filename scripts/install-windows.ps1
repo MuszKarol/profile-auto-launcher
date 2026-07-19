@@ -48,15 +48,17 @@ if ($LASTEXITCODE -ne 0) {
 & $python.Source -m pip install --user --upgrade "$repoDir[full]"
 if ($LASTEXITCODE -ne 0) { throw "pip install failed with exit $LASTEXITCODE" }
 
-# Locate palaunch.exe - prefer PATH, fall back to the user Scripts dir.
+# Locate palaunch.exe - prefer the user Scripts dir we just installed into
+# (an older copy elsewhere on PATH would otherwise shadow the fresh install),
+# fall back to PATH.
 $userScripts = & $python.Source -c "import sysconfig; print(sysconfig.get_path('scripts', 'nt_user'))"
-$palaunch = Get-Command palaunch -ErrorAction SilentlyContinue
-if ($palaunch) {
-    $palaunchPath = $palaunch.Source
+$candidate = Join-Path $userScripts "palaunch.exe"
+if (Test-Path $candidate) {
+    $palaunchPath = $candidate
 } else {
-    $candidate = Join-Path $userScripts "palaunch.exe"
-    if (Test-Path $candidate) {
-        $palaunchPath = $candidate
+    $palaunch = Get-Command palaunch -ErrorAction SilentlyContinue
+    if ($palaunch) {
+        $palaunchPath = $palaunch.Source
     } else {
         throw "palaunch.exe not found after install. Expected at $candidate."
     }
@@ -93,15 +95,21 @@ if ($NoAutostart) {
     return
 }
 
-# Create a Startup-folder shortcut that runs `palaunch tray` minimized.
+# Create a Startup-folder shortcut that runs `palaunchw tray` — the windowed
+# (gui-scripts) binary, so no console window appears at sign-in.
+$palaunchwPath = Join-Path (Split-Path $palaunchPath -Parent) "palaunchw.exe"
+if (-not (Test-Path $palaunchwPath)) {
+    Write-Warning "palaunchw.exe not found next to palaunch.exe; the shortcut will open a console window."
+    $palaunchwPath = $palaunchPath
+}
 $startup      = [Environment]::GetFolderPath('Startup')
 $shortcutPath = Join-Path $startup "Profile Auto Launcher.lnk"
 $shell        = New-Object -ComObject WScript.Shell
 $shortcut     = $shell.CreateShortcut($shortcutPath)
-$shortcut.TargetPath       = $palaunchPath
+$shortcut.TargetPath       = $palaunchwPath
 $shortcut.Arguments        = "tray"
-$shortcut.WorkingDirectory = (Split-Path $palaunchPath -Parent)
-$shortcut.WindowStyle      = 7        # Minimized
+$shortcut.WorkingDirectory = (Split-Path $palaunchwPath -Parent)
+$shortcut.WindowStyle      = 7        # Minimized (harmless for the windowed exe)
 $shortcut.Description      = "Profile Auto Launcher (tray)"
 $shortcut.Save()
 
