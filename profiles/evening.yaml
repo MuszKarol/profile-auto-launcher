@@ -1,0 +1,55 @@
+# Composition example: this profile mostly reuses other profiles and shows the
+# step types that talk to the outside world (http, plugin).
+name: Evening
+description: Wind down — close work, run Focus, tell the house you're done
+icon: "🌙"
+tags: [routine, home]
+
+triggers:
+  - name: end of day
+    at: "18:30"
+    weekday: [mon, tue, wed, thu, fri]
+    # Only at home, and only while plugged in at the desk.
+    when:
+      wifi_ssid: [HomeNet]
+
+steps:
+  # Reuse whole profiles instead of copying their steps around. `env` changes
+  # made inside a nested profile stay visible to the steps that follow.
+  - type: profile
+    name: shut down the dev environment
+    profile: Dev
+    enabled: false # flip to true once your Dev profile has a teardown you like
+
+  - type: profile
+    name: run Focus
+    profile: Focus
+
+  # Fire a webhook. `{{ secret.NAME }}` reads the OS credential store —
+  # store it first with:  palaunch secret set home_assistant_token
+  - type: http
+    name: evening scene
+    optional: true
+    method: POST
+    url: http://homeassistant.local:8123/api/services/scene/turn_on
+    headers:
+      Authorization: "Bearer {{ secret.home_assistant_token }}"
+    body:
+      entity_id: scene.evening
+    expect_status: [200, 201]
+    timeout: 10
+    retries: 2
+    retry_delay: 2
+
+  # External executables get a JSON request on stdin and may answer with
+  # {"ok": true, "detail": "...", "env": {...}}. See plugins/hello_plugin.py.
+  - type: plugin
+    name: log the day
+    optional: true
+    plugin: "~/.config/profile-auto-launcher/plugins/hello_plugin.py"
+    config:
+      message: "wrapped up at {{ time }}"
+
+  - type: notify
+    title: Evening
+    message: "Work shut down. See you tomorrow."

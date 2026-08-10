@@ -88,6 +88,25 @@ Get-ChildItem -Path (Join-Path $repoDir "profiles") -Filter "*.yaml" | ForEach-O
 }
 Write-Host "==> Profiles dir:    $profilesDir"
 
+# Example plugin for `type: plugin` steps.
+$repoPlugins = Join-Path $repoDir "plugins"
+if (Test-Path $repoPlugins) {
+    $pluginsDir = Join-Path $configDir "plugins"
+    New-Item -ItemType Directory -Force -Path $pluginsDir | Out-Null
+    Get-ChildItem -Path $repoPlugins -Filter "*.py" | ForEach-Object {
+        $dest = Join-Path $pluginsDir $_.Name
+        if (-not (Test-Path $dest)) {
+            Copy-Item $_.FullName $dest
+            Write-Host "    installed plugin:  $($_.Name)"
+        }
+    }
+}
+
+# Generate the JSON Schema so the `# yaml-language-server:` modeline that
+# `palaunch new` writes resolves to a real file and editors validate as you type.
+& $palaunchPath schema | Out-Null
+if ($LASTEXITCODE -eq 0) { Write-Host "==> Profile JSON Schema written" }
+
 if ($NoAutostart) {
     Write-Host "==> Autostart skipped (-NoAutostart)."
     Write-Host ""

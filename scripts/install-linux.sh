@@ -103,6 +103,25 @@ for f in "$REPO_DIR"/profiles/*.yaml; do
 done
 echo "==> Profiles dir:    $PROFILES_DIR"
 
+# Example plugin for `type: plugin` steps.
+PLUGINS_DIR="$(dirname "$PROFILES_DIR")/plugins"
+if [ -d "$REPO_DIR/plugins" ]; then
+    mkdir -p "$PLUGINS_DIR"
+    for f in "$REPO_DIR"/plugins/*.py; do
+        [ -e "$f" ] || continue
+        dest="$PLUGINS_DIR/$(basename "$f")"
+        if [ ! -f "$dest" ]; then
+            cp "$f" "$dest"
+            chmod +x "$dest"
+            echo "    installed plugin:  $(basename "$f")"
+        fi
+    done
+fi
+
+# Generate the JSON Schema so the `# yaml-language-server:` modeline that
+# `palaunch new` writes resolves to a real file and editors validate as you type.
+"$PALAUNCH_BIN" schema >/dev/null 2>&1 && echo "==> Profile JSON Schema written"
+
 if [ "$ENABLE_AUTOSTART" = "0" ]; then
     echo "==> Autostart skipped (--no-autostart)."
     echo "Done. Start manually with:  $PALAUNCH_BIN tray"

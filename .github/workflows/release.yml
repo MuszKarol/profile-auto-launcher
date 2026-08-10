@@ -1,0 +1,295 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build and attest, but publish nothing"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+env:
+  # workflow_dispatch has no tag, so everything falls back to the pyproject
+  # version and nothing is published unless a real tag triggered the run.
+  PUBLISH: ${{ github.event_name == 'push' && !inputs.dry_run }}
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m pytest -q
+      - run: ruff check src tests
+
+      - name: Read the package version
+        id: version
+        run: |
+          version=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Package version: $version"
+
+      - name: Tag must match the package version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$tag" != "${{ steps.version.outputs.version }}" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match pyproject version ${{ steps.version.outputs.version }}"
+            exit 1
+          fi
+
+  sdist-wheel:
+    name: sdist + wheel
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: python -m pip install build twine
+      - run: python -m build
+      - name: Check the metadata PyPI will see
+        run: python -m twine check dist/*
+
+      - name: Attest provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "dist/*"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-dist
+          path: dist/*
+
+  binaries:
+    name: Binary · ${{ matrix.os }}
+    needs: verify
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux-x86_64
+          - os: windows-latest
+            label: windows-x86_64
+          - os: macos-latest
+            label: macos-arm64
+          - os: macos-13
+            label: macos-x86_64
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller ".[full]"
+
+      - name: Build
+        run: pyinstaller packaging/palaunch.spec --noconfirm
+
+      - name: Smoke-test the frozen binary
+        shell: bash
+        env:
+          PAL_CONFIG_DIR: ${{ runner.temp }}/palcfg
+        run: |
+          binary="dist/palaunch"
+          [ "${{ runner.os }}" = "Windows" ] && binary="dist/palaunch.exe"
+          "$binary" --help > /dev/null
+          "$binary" new "Smoke Test"
+          "$binary" validate
+          "$binary" run "Smoke Test" --dry-run
+
+      # ── optional code signing ──────────────────────────────────────────
+      # Both steps no-op when the certificate secrets are absent, so forks and
+      # first-time releases work without any signing setup at all.
+      - name: Sign (macOS)
+        if: runner.os == 'macOS'
+        env:
+          CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          if [ -z "$CERTIFICATE" ]; then
+            echo "No macOS certificate configured — shipping an unsigned binary."
+            exit 0
+          fi
+          keychain="$RUNNER_TEMP/build.keychain"
+          security create-keychain -p actions "$keychain"
+          security default-keychain -s "$keychain"
+          security unlock-keychain -p actions "$keychain"
+          echo "$CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" \
+            -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k actions "$keychain"
+          for binary in dist/palaunch dist/palaunchw; do
+            codesign --force --options runtime --timestamp --sign "$IDENTITY" "$binary"
+            codesign --verify --strict --verbose=2 "$binary"
+          done
+          if [ -n "$APPLE_ID" ]; then
+            ditto -c -k dist/palaunch "$RUNNER_TEMP/notarize.zip"
+            xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
+              --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+              --password "$APPLE_APP_PASSWORD" --wait
+          fi
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+      - name: Sign (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if (-not $env:CERTIFICATE) {
+            Write-Host "No Windows certificate configured - shipping an unsigned binary."
+            exit 0
+          }
+          $pfx = Join-Path $env:RUNNER_TEMP "cert.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CERTIFICATE))
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+            Where-Object { $_.FullName -like "*x64*" } | Select-Object -First 1
+          foreach ($binary in @("dist\palaunch.exe", "dist\palaunchw.exe")) {
+            & $signtool.FullName sign /f $pfx /p $env:CERTIFICATE_PASSWORD `
+              /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $binary
+            if ($LASTEXITCODE -ne 0) { throw "signtool failed on $binary" }
+          }
+          Remove-Item $pfx -Force
+
+      # ── package ────────────────────────────────────────────────────────
+      - name: Package
+        shell: bash
+        run: |
+          version="${{ needs.verify.outputs.version }}"
+          name="palaunch-${version}-${{ matrix.label }}"
+          mkdir -p "staging/$name"
+          cp README.md LICENSE "staging/$name"
+          cp -r profiles plugins "staging/$name"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp dist/palaunch.exe dist/palaunchw.exe "staging/$name"
+            (cd staging && 7z a -tzip "../$name.zip" "$name") > /dev/null
+          else
+            cp dist/palaunch dist/palaunchw "staging/$name"
+            tar -czf "$name.tar.gz" -C staging "$name"
+          fi
+          # Checksums let anyone verify a download without the GitHub API.
+          for archive in "$name".*; do
+            if command -v sha256sum > /dev/null; then
+              sha256sum "$archive" > "$archive.sha256"
+            else
+              shasum -a 256 "$archive" > "$archive.sha256"
+            fi
+          done
+
+      - name: Attest provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "palaunch-*.tar.gz,palaunch-*.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.label }}
+          path: |
+            palaunch-*.tar.gz
+            palaunch-*.zip
+            palaunch-*.sha256
+
+  pypi:
+    name: Publish to PyPI
+    needs: [verify, sdist-wheel, binaries]
+    if: github.event_name == 'push' && !inputs.dry_run
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/profile-auto-launcher
+    permissions:
+      # Trusted Publishing: PyPI verifies this workflow's OIDC identity, so no
+      # API token is stored anywhere. Configure the publisher once at
+      # https://pypi.org/manage/project/profile-auto-launcher/settings/publishing/
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    name: GitHub Release
+    needs: [verify, sdist-wheel, binaries]
+    if: github.event_name == 'push' && !inputs.dry_run
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Collect checksums
+        run: |
+          cd artifacts
+          cat *.sha256 > SHA256SUMS.txt 2>/dev/null || true
+          rm -f *.sha256
+          ls -la
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${{ needs.verify.outputs.version }}"
+          notes=$(mktemp)
+          {
+            echo "## Install"
+            echo
+            echo '```bash'
+            echo "pip install profile-auto-launcher==$version"
+            echo '```'
+            echo
+            echo "Or download a self-contained binary below — no Python needed."
+            echo
+            echo "## Verify a download"
+            echo
+            echo '```bash'
+            echo "sha256sum -c SHA256SUMS.txt --ignore-missing"
+            echo "gh attestation verify palaunch-$version-linux-x86_64.tar.gz --repo ${{ github.repository }}"
+            echo '```'
+          } > "$notes"
+          gh release create "$GITHUB_REF_NAME" \
+            --title "v$version" \
+            --notes-file "$notes" \
+            --generate-notes \
+            artifacts/*

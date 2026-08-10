@@ -4,9 +4,9 @@ Windows: WinRT toast via a hidden PowerShell; macOS: osascript;
 Linux: notify-send. Failures are swallowed — a missing notifier must
 never break a profile run. Disable entirely with PAL_NOTIFY=0.
 """
+
 from __future__ import annotations
 
-import os
 import subprocess
 
 from launcher.config import PLATFORM
@@ -27,7 +27,9 @@ def _ps_quote(text: str) -> str:
 
 
 def notify(title: str, body: str) -> None:
-    if os.environ.get("PAL_NOTIFY") == "0":
+    from launcher import settings
+
+    if not settings.load().notifications:
         return
     try:
         if PLATFORM == "windows":
@@ -46,12 +48,14 @@ def notify(title: str, body: str) -> None:
             )
             subprocess.Popen(
                 ["osascript", "-e", osa],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
         else:
             subprocess.Popen(
                 ["notify-send", "--app-name=Profile Auto Launcher", title, body],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
     except OSError:
         pass
