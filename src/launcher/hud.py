@@ -1,8 +1,9 @@
 """HUD-style profile picker built on Tkinter (stdlib, always available).
 
-Keyboard-first: type to filter (fuzzy), ↑/↓ to move, Enter to run, Esc to
-cancel. After picking, the HUD stays open and streams per-step results live,
-so you see exactly which steps succeeded — then auto-closes on success.
+Keyboard-first: type to filter (fuzzy), ↑/↓ to move, → to preview the steps,
+Enter to run, Ctrl+E to edit, Ctrl+K to stop a running profile, Esc to close.
+After picking, the HUD streams per-step results live, so you see exactly which
+steps succeeded — then auto-closes on success.
 """
 from __future__ import annotations
 
@@ -11,23 +12,16 @@ import threading
 import tkinter as tk
 from typing import Callable
 
+from launcher import theme
 from launcher.config import Profile
-from launcher.executor import StepResult, format_result, run_profile
+from launcher.executor import (
+    StepResult,
+    describe_step,
+    format_result,
+    run_profile,
+    stop_profile,
+)
 from launcher.state import load_state
-
-# ── palette ──────────────────────────────────────────────────────────────
-BG = "#0e1117"          # window background
-PANEL = "#161b26"       # row background
-PANEL_HOVER = "#1b2231"
-PANEL_SELECTED = "#20293d"
-FG = "#e6e9ef"
-MUTED = "#7b8496"
-ACCENT = "#7aa2f7"
-BORDER = "#2a3247"
-OK = "#7ee2a8"
-ERR = "#f38ba8"
-
-FONT = "Segoe UI"
 
 
 def _fuzzy_score(q: str, text: str) -> int | None:
@@ -57,8 +51,24 @@ def _match(q: str, p: Profile) -> int | None:
     return max(hits) if hits else None
 
 
+def _active_names() -> set[str]:
+    from launcher import procs
+
+    try:
+        return set(procs.active_profiles())
+    except Exception:
+        return set()
+
+
 class _Hud:
     def __init__(self, profiles: list[Profile], execute: bool) -> None:
+        from launcher import settings
+
+        self.conf = settings.load()
+        self.pal = theme.palette()
+        self.font = theme.font_family()
+        self.mono = theme.mono_family()
+
         self.profiles = profiles
         self.execute = execute
         self.filtered: list[Profile] = list(profiles)
@@ -68,9 +78,11 @@ class _Hud:
         self.exit_code = 0
         self.failed_count = 0
         self.running = False
+        self.preview_open = False
         state = load_state()
         self.last_profile: str | None = state.get("last_profile")
         self.run_counts: dict[str, int] = state.get("run_counts", {})
+        self.active: set[str] = _active_names()
         # Cross-thread close request (e.g. the global hotkey toggling the HUD
         # from the pynput listener thread — Tk itself is not thread-safe, so
         # the flag is polled from inside the Tk loop instead).
@@ -80,24 +92,31 @@ class _Hud:
         self.root = tk.Tk()
         self.root.withdraw()
         self.root.title("Profile Auto Launcher")
-        self.root.configure(bg=BORDER)
+        self.root.configure(bg=self.pal.border)
         try:
             self.root.attributes("-topmost", True)
         except tk.TclError:
             pass
         self.root.overrideredirect(True)
 
-        w, h = 620, 420
-        sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
-        self.root.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 3}")
+        self.base_width = max(420, self.conf.hud_width)
+        self.height = max(300, self.conf.hud_height)
+        self._resize(self.base_width)
 
-        # 1px accent-ish border via outer frame
-        self.outer = tk.Frame(self.root, bg=BG, padx=18, pady=16)
+        self.outer = tk.Frame(self.root, bg=self.pal.bg, padx=18, pady=16)
         self.outer.pack(fill="both", expand=True, padx=1, pady=1)
 
         self._build_picker()
         self.root.after(100, self._watch_close)
         self.root.deiconify()
+
+    def _resize(self, width: int) -> None:
+        screen_w = self.root.winfo_screenwidth()
+        screen_h = self.root.winfo_screenheight()
+        width = min(width, screen_w - 40)
+        self.root.geometry(
+            f"{width}x{self.height}+{(screen_w - width) // 2}+{(screen_h - self.height) // 3}"
+        )
 
     def request_close(self) -> None:
         """Thread-safe close request; honoured within ~100 ms."""
@@ -115,36 +134,42 @@ class _Hud:
 
     # ── picker view ──────────────────────────────────────────────────────
     def _build_picker(self) -> None:
-        header = tk.Frame(self.outer, bg=BG)
+        pal = self.pal
+        header = tk.Frame(self.outer, bg=pal.bg)
         header.pack(fill="x")
         tk.Label(
-            header, text="◈", bg=BG, fg=ACCENT, font=(FONT, 14, "bold")
+            header, text="◈", bg=pal.bg, fg=pal.accent, font=(self.font, 14, "bold")
         ).pack(side="left", padx=(0, 8))
 
         self.query = tk.StringVar()
         self.entry = tk.Entry(
-            header, textvariable=self.query, bg=BG, fg=FG, insertbackground=ACCENT,
-            relief="flat", font=(FONT, 15), highlightthickness=0,
+            header, textvariable=self.query, bg=pal.bg, fg=pal.fg,
+            insertbackground=pal.accent, relief="flat", font=(self.font, 15),
+            highlightthickness=0,
         )
         self.entry.pack(side="left", fill="x", expand=True, ipady=6)
         self.entry.focus_set()
 
         self.placeholder = tk.Label(
-            header, text="Search profiles…", bg=BG, fg=MUTED, font=(FONT, 15)
+            header, text="Search profiles…", bg=pal.bg, fg=pal.muted, font=(self.font, 15)
         )
         self.placeholder.place(in_=self.entry, x=2, y=6)
         self.placeholder.bind("<Button-1>", lambda _e: self.entry.focus_set())
 
-        sep = tk.Frame(self.outer, bg=BORDER, height=1)
-        sep.pack(fill="x", pady=(10, 12))
+        tk.Frame(self.outer, bg=pal.border, height=1).pack(fill="x", pady=(10, 12))
 
-        self.list_frame = tk.Frame(self.outer, bg=BG)
-        self.list_frame.pack(fill="both", expand=True)
+        self.body = tk.Frame(self.outer, bg=pal.bg)
+        self.body.pack(fill="both", expand=True)
+
+        self.list_frame = tk.Frame(self.body, bg=pal.bg)
+        self.list_frame.pack(side="left", fill="both", expand=True)
+
+        self.preview_frame = tk.Frame(self.body, bg=pal.panel, padx=12, pady=10)
 
         self.footer = tk.Label(
             self.outer,
-            text="↑↓ navigate    ⏎ run    esc close",
-            bg=BG, fg=MUTED, font=(FONT, 9),
+            text="↑↓ navigate    ⏎ run    → preview    ctrl+e edit    ctrl+k stop    esc close",
+            bg=pal.bg, fg=pal.muted, font=(self.font, 9),
         )
         self.footer.pack(anchor="w", pady=(10, 0))
 
@@ -153,6 +178,11 @@ class _Hud:
         self.root.bind("<Escape>", self._cancel)
         self.root.bind("<Up>", lambda _e: self._move(-1))
         self.root.bind("<Down>", lambda _e: self._move(1))
+        self.root.bind("<Right>", lambda _e: self._set_preview(True))
+        self.root.bind("<Left>", lambda _e: self._set_preview(False))
+        self.root.bind("<Tab>", lambda _e: self._set_preview(not self.preview_open))
+        self.root.bind("<Control-e>", self._edit_selected)
+        self.root.bind("<Control-k>", self._stop_selected)
         self.root.bind("<FocusOut>", self._maybe_close_on_blur)
         self._redraw()
 
@@ -168,6 +198,7 @@ class _Hud:
             self._cancel()
 
     def _redraw(self) -> None:
+        pal = self.pal
         q = self.query.get().lower().strip()
         if self.query.get():
             self.placeholder.place_forget()
@@ -195,9 +226,10 @@ class _Hud:
         self.rows.clear()
 
         if not self.filtered:
-            empty = tk.Frame(self.list_frame, bg=BG)
+            empty = tk.Frame(self.list_frame, bg=pal.bg)
             tk.Label(
-                empty, text="No matching profiles", bg=BG, fg=MUTED, font=(FONT, 11)
+                empty, text="No matching profiles", bg=pal.bg, fg=pal.muted,
+                font=(self.font, 11),
             ).pack(pady=24)
             empty.pack(fill="x")
             self.rows.append(empty)
@@ -208,26 +240,42 @@ class _Hud:
         self._highlight()
 
     def _make_row(self, i: int, p: Profile) -> tk.Frame:
-        row = tk.Frame(self.list_frame, bg=PANEL, padx=12, pady=8)
+        pal = self.pal
+        row = tk.Frame(self.list_frame, bg=pal.panel, padx=12, pady=8)
         row.pack(fill="x", pady=3)
 
-        bar = tk.Frame(row, bg=PANEL, width=3)
+        bar = tk.Frame(row, bg=pal.panel, width=3)
         bar.pack(side="left", fill="y", padx=(0, 10))
         row.accent_bar = bar  # type: ignore[attr-defined]
 
         icon = p.icon or "▣"
-        tk.Label(row, text=icon, bg=PANEL, fg=ACCENT, font=(FONT, 13)).pack(side="left", padx=(0, 10))
+        tk.Label(row, text=icon, bg=pal.panel, fg=pal.accent, font=(self.font, 13)).pack(
+            side="left", padx=(0, 10)
+        )
 
-        text = tk.Frame(row, bg=PANEL)
+        text = tk.Frame(row, bg=pal.panel)
         text.pack(side="left", fill="x", expand=True)
         title = p.name + ("  ★" if p.default else "")
-        tk.Label(text, text=title, bg=PANEL, fg=FG, font=(FONT, 12, "bold"), anchor="w").pack(fill="x")
+        tk.Label(
+            text, text=title, bg=pal.panel, fg=pal.fg, font=(self.font, 12, "bold"), anchor="w"
+        ).pack(fill="x")
         if p.description:
-            tk.Label(text, text=p.description, bg=PANEL, fg=MUTED, font=(FONT, 9), anchor="w").pack(fill="x")
+            tk.Label(
+                text, text=p.description, bg=pal.panel, fg=pal.muted,
+                font=(self.font, 9), anchor="w",
+            ).pack(fill="x")
 
-        tk.Label(row, text=f"{len(p.steps)} steps", bg=PANEL, fg=MUTED, font=(FONT, 9)).pack(side="right")
-        if p.name == self.last_profile:
-            tk.Label(row, text="↺ recent", bg=PANEL, fg=ACCENT, font=(FONT, 9)).pack(side="right", padx=(0, 10))
+        tk.Label(
+            row, text=f"{len(p.steps)} steps", bg=pal.panel, fg=pal.muted, font=(self.font, 9)
+        ).pack(side="right")
+        if p.name in self.active:
+            tk.Label(
+                row, text="● running", bg=pal.panel, fg=pal.ok, font=(self.font, 9)
+            ).pack(side="right", padx=(0, 10))
+        elif p.name == self.last_profile:
+            tk.Label(
+                row, text="↺ recent", bg=pal.panel, fg=pal.accent, font=(self.font, 9)
+            ).pack(side="right", padx=(0, 10))
 
         def set_bg(color: str) -> None:
             for widget in (row, text, *row.winfo_children(), *text.winfo_children()):
@@ -249,14 +297,100 @@ class _Hud:
         for i, row in enumerate(self.rows):
             selected = i == self.index
             if hasattr(row, "set_bg"):
-                row.set_bg(PANEL_SELECTED if selected else PANEL)
-                row.accent_bar.configure(bg=ACCENT if selected else PANEL)
+                row.set_bg(self.pal.panel_selected if selected else self.pal.panel)
+                row.accent_bar.configure(bg=self.pal.accent if selected else self.pal.panel)
+        if self.preview_open:
+            self._render_preview()
 
     def _move(self, delta: int) -> None:
         if not self.filtered:
             return
         self.index = (self.index + delta) % len(self.filtered)
         self._highlight()
+
+    # ── step preview ─────────────────────────────────────────────────────
+    def _set_preview(self, visible: bool) -> str:
+        if self.running or visible == self.preview_open:
+            return "break"
+        self.preview_open = visible
+        if visible:
+            self._resize(int(self.base_width * 1.55))
+            self.preview_frame.pack(side="right", fill="both", padx=(12, 0))
+            self._render_preview()
+        else:
+            self.preview_frame.pack_forget()
+            self._resize(self.base_width)
+        return "break"  # keep Tab from moving focus out of the entry
+
+    def _render_preview(self) -> None:
+        pal = self.pal
+        for child in self.preview_frame.winfo_children():
+            child.destroy()
+        if not self.filtered:
+            return
+        profile = self.filtered[self.index]
+        tk.Label(
+            self.preview_frame, text=profile.name, bg=pal.panel, fg=pal.fg,
+            font=(self.font, 11, "bold"), anchor="w",
+        ).pack(fill="x")
+        if profile.tags:
+            tk.Label(
+                self.preview_frame, text=" · ".join(profile.tags), bg=pal.panel,
+                fg=pal.muted, font=(self.font, 9), anchor="w",
+            ).pack(fill="x", pady=(0, 6))
+
+        shown = profile.steps[:14]
+        for step in shown:
+            line = tk.Frame(self.preview_frame, bg=pal.panel)
+            line.pack(fill="x", pady=1)
+            glyph = "○" if not step.enabled else ("⇉" if step.parallel else "→")
+            tk.Label(
+                line, text=glyph, bg=pal.panel,
+                fg=pal.muted if not step.enabled else pal.accent,
+                font=(self.font, 9), width=2,
+            ).pack(side="left")
+            tk.Label(
+                line, text=describe_step(step)[:64], bg=pal.panel,
+                fg=pal.muted if not step.enabled else pal.fg,
+                font=(self.mono, 8), anchor="w", justify="left",
+            ).pack(side="left", fill="x", expand=True)
+        if len(profile.steps) > len(shown):
+            tk.Label(
+                self.preview_frame, text=f"… +{len(profile.steps) - len(shown)} more",
+                bg=pal.panel, fg=pal.muted, font=(self.font, 9), anchor="w",
+            ).pack(fill="x", pady=(4, 0))
+
+    # ── secondary actions ────────────────────────────────────────────────
+    def _edit_selected(self, _event=None) -> str:
+        if self.running or not self.filtered:
+            return "break"
+        profile = self.filtered[self.index]
+        self.chosen = None
+        self.root.destroy()
+        from launcher.editor import edit_profile
+
+        edit_profile(profile)
+        return "break"
+
+    def _stop_selected(self, _event=None) -> str:
+        if self.running or not self.filtered:
+            return "break"
+        profile = self.filtered[self.index]
+        self.running = True
+        self._build_progress(profile, verb="Stopping")
+
+        def worker() -> None:
+            try:
+                results, stopped, stubborn = stop_profile(profile, self.results_q.put)
+                self.results_q.put(
+                    _synthetic(profile, f"{stopped} process(es) closed, {stubborn} left")
+                )
+            finally:
+                self.results_q.put(None)
+
+        threading.Thread(target=worker, daemon=True).start()
+        self.root.after(60, self._poll_results)
+        return "break"
 
     def _cancel(self, _event=None) -> None:
         self.chosen = None
@@ -275,28 +409,34 @@ class _Hud:
         threading.Thread(target=self._worker, args=(self.chosen,), daemon=True).start()
         self.root.after(60, self._poll_results)
 
-    def _build_progress(self, profile: Profile) -> None:
+    def _build_progress(self, profile: Profile, verb: str = "Running") -> None:
+        pal = self.pal
+        if self.preview_open:
+            self.preview_frame.pack_forget()
+            self.preview_open = False
+            self._resize(self.base_width)
         for child in self.outer.winfo_children():
             child.destroy()
         self.rows.clear()
 
-        header = tk.Frame(self.outer, bg=BG)
+        header = tk.Frame(self.outer, bg=pal.bg)
         header.pack(fill="x")
         tk.Label(
-            header, text=profile.icon or "◈", bg=BG, fg=ACCENT, font=(FONT, 14)
+            header, text=profile.icon or "◈", bg=pal.bg, fg=pal.accent, font=(self.font, 14)
         ).pack(side="left", padx=(0, 8))
         tk.Label(
-            header, text=f"Running {profile.name}…", bg=BG, fg=FG, font=(FONT, 14, "bold")
+            header, text=f"{verb} {profile.name}…", bg=pal.bg, fg=pal.fg,
+            font=(self.font, 14, "bold"),
         ).pack(side="left")
 
-        tk.Frame(self.outer, bg=BORDER, height=1).pack(fill="x", pady=(10, 12))
+        tk.Frame(self.outer, bg=pal.border, height=1).pack(fill="x", pady=(10, 12))
 
-        self.progress_frame = tk.Frame(self.outer, bg=BG)
+        self.progress_frame = tk.Frame(self.outer, bg=pal.bg)
         self.progress_frame.pack(fill="both", expand=True)
 
         self.status = tk.Label(
             self.outer, text="esc hide window (steps keep running)",
-            bg=BG, fg=MUTED, font=(FONT, 9),
+            bg=pal.bg, fg=pal.muted, font=(self.font, 9),
         )
         self.status.pack(anchor="w", pady=(10, 0))
         self.root.bind("<Escape>", lambda _e: self.root.destroy())
@@ -328,38 +468,49 @@ class _Hud:
             self.root.after(60, self._poll_results)
 
     def _add_result_row(self, res: StepResult) -> None:
+        pal = self.pal
         if res.counts_as_failure:
             self.failed_count += 1
-        row = tk.Frame(self.progress_frame, bg=BG)
+        row = tk.Frame(self.progress_frame, bg=pal.bg)
         row.pack(fill="x", pady=2)
         if res.skipped:
-            glyph, color = "○", MUTED
+            glyph, color = "○", pal.muted
         elif res.ok:
-            glyph, color = "✓", OK
+            glyph, color = "✓", pal.ok
         else:
-            glyph, color = "✗", ERR
-        tk.Label(row, text=glyph, bg=BG, fg=color, font=(FONT, 11, "bold"), width=2).pack(side="left")
-        label = res.step.name or res.step.type
-        tk.Label(row, text=label, bg=BG, fg=FG, font=(FONT, 10), anchor="w").pack(side="left")
-        detail_fg = ERR if (not res.ok and not res.step.optional) else MUTED
+            glyph, color = "✗", pal.err
         tk.Label(
-            row, text=res.detail, bg=BG, fg=detail_fg, font=(FONT, 9), anchor="e"
+            row, text=glyph, bg=pal.bg, fg=color, font=(self.font, 11, "bold"), width=2
+        ).pack(side="left")
+        tk.Label(
+            row, text=res.step.label, bg=pal.bg, fg=pal.fg, font=(self.font, 10), anchor="w"
+        ).pack(side="left")
+        detail_fg = pal.err if (not res.ok and not res.step.optional) else pal.muted
+        tk.Label(
+            row, text=res.detail[:90], bg=pal.bg, fg=detail_fg, font=(self.font, 9), anchor="e"
         ).pack(side="right")
 
     def _finish(self) -> None:
         failed = self.failed_count
         if failed == 0:
-            self.status.configure(text="✓ all steps finished — closing…", fg=OK)
+            self.status.configure(text="✓ all steps finished — closing…", fg=self.pal.ok)
             self.exit_code = 0
             self.root.after(1400, self.root.destroy)
         else:
             self.status.configure(
-                text=f"✗ {failed} step(s) failed — esc to close", fg=ERR
+                text=f"✗ {failed} step(s) failed — esc to close", fg=self.pal.err
             )
             self.exit_code = 1
 
     def run(self) -> None:
         self.root.mainloop()
+
+
+def _synthetic(profile: Profile, detail: str) -> StepResult:
+    """A result row that reports on the run itself rather than on a step."""
+    from launcher.config import Step
+
+    return StepResult(Step(type="kill", name=f"stop {profile.name}"), True, detail)
 
 
 _active_lock = threading.Lock()
