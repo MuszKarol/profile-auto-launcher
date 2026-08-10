@@ -7,6 +7,7 @@ an empty string into a command line.
 
 Secrets are never written to the log or to run history.
 """
+
 from __future__ import annotations
 
 SERVICE = "profile-auto-launcher"
@@ -20,9 +21,7 @@ def _backend():
     try:
         import keyring
     except ImportError as exc:  # pragma: no cover - depends on the environment
-        raise SecretError(
-            "keyring is not installed — run `pip install .[secrets]`"
-        ) from exc
+        raise SecretError("keyring is not installed — run `pip install .[secrets]`") from exc
     return keyring
 
 
@@ -78,7 +77,9 @@ def _index_path():
 def _load_index() -> list[str]:
     path = _index_path()
     try:
-        return [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        return [
+            line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
+        ]
     except OSError:
         return []
 

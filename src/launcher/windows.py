@@ -15,6 +15,7 @@ Backends: ctypes/user32 on Windows, `wmctrl`+`xdotool` on X11, AppleScript on
 macOS. Anything missing degrades to a logged "skipped" — a window that ends up
 in the wrong place must never fail a profile.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -29,11 +30,22 @@ from launcher.logging_setup import get_logger
 log = get_logger("windows")
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
-NAMED_POSITIONS = frozenset({
-    "left-half", "right-half", "top-half", "bottom-half",
-    "maximized", "fullscreen", "center", "full",
-    "top-left", "top-right", "bottom-left", "bottom-right",
-})
+NAMED_POSITIONS = frozenset(
+    {
+        "left-half",
+        "right-half",
+        "top-half",
+        "bottom-half",
+        "maximized",
+        "fullscreen",
+        "center",
+        "full",
+        "top-left",
+        "top-right",
+        "bottom-left",
+        "bottom-right",
+    }
+)
 
 
 class WindowError(RuntimeError):
@@ -50,8 +62,12 @@ class Rect:
 
 def _run(argv: list[str], timeout: float = 5.0) -> str:
     proc = subprocess.run(
-        argv, capture_output=True, text=True, timeout=timeout,
-        check=False, creationflags=_NO_WINDOW,
+        argv,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
+        creationflags=_NO_WINDOW,
     )
     if proc.returncode != 0:
         raise WindowError(f"{argv[0]} failed: {proc.stderr.strip() or proc.returncode}")
@@ -90,8 +106,10 @@ def _target_rect(spec: dict[str, Any], screen: Rect) -> Rect | None:
         "maximized": Rect(screen.x, screen.y, screen.width, screen.height),
         "fullscreen": Rect(screen.x, screen.y, screen.width, screen.height),
         "center": Rect(
-            screen.x + screen.width // 4, screen.y + screen.height // 4,
-            half_w, half_h,
+            screen.x + screen.width // 4,
+            screen.y + screen.height // 4,
+            half_w,
+            half_h,
         ),
     }
     return layouts.get(position)
@@ -148,8 +166,11 @@ def _monitors_windows() -> list[Rect]:  # pragma: no cover - Windows only
 
     MONITORINFOF_PRIMARY = 0x1
     callback_type = ctypes.WINFUNCTYPE(
-        ctypes.c_int, wintypes.HMONITOR, wintypes.HDC,
-        ctypes.POINTER(wintypes.RECT), wintypes.LPARAM,
+        ctypes.c_int,
+        wintypes.HMONITOR,
+        wintypes.HDC,
+        ctypes.POINTER(wintypes.RECT),
+        wintypes.LPARAM,
     )
     primary: list[Rect] = []
 
@@ -231,7 +252,12 @@ def _apply_windows(spec: dict[str, Any], pid: int | None, match: str) -> str:  #
     rect = _target_rect(spec, screen)
     if rect:
         user32.SetWindowPos(
-            hwnd, None, rect.x, rect.y, rect.width, rect.height,
+            hwnd,
+            None,
+            rect.x,
+            rect.y,
+            rect.width,
+            rect.height,
             SWP_NOZORDER | SWP_NOACTIVATE,
         )
     if state in ("maximized", "fullscreen"):
@@ -322,10 +348,16 @@ def _apply_linux(spec: dict[str, Any], pid: int | None, match: str) -> str:
     detail = "adjusted"
     rect = _target_rect(spec, _pick_monitor(_monitors_linux(), spec))
     if rect and state not in ("maximized", "fullscreen"):
-        _run([
-            "wmctrl", "-i", "-r", win_id, "-e",
-            f"0,{rect.x},{rect.y},{rect.width},{rect.height}",
-        ])
+        _run(
+            [
+                "wmctrl",
+                "-i",
+                "-r",
+                win_id,
+                "-e",
+                f"0,{rect.x},{rect.y},{rect.width},{rect.height}",
+            ]
+        )
         detail = f"placed at {rect.x},{rect.y} {rect.width}x{rect.height}"
     if state == "maximized":
         _run(["wmctrl", "-i", "-r", win_id, "-b", "add,maximized_vert,maximized_horz"])
@@ -362,7 +394,8 @@ def _apply_darwin(spec: dict[str, Any], pid: int | None, match: str) -> str:
         raise WindowError("macOS placement needs a tracked pid or a `match:` title")
 
     selector = (
-        f'first process whose unix id is {pid}' if pid
+        f"first process whose unix id is {pid}"
+        if pid
         else f'first process whose name contains "{match}"'
     )
     deadline = time.time() + float(spec.get("timeout", 10))
@@ -383,7 +416,7 @@ def _apply_darwin(spec: dict[str, Any], pid: int | None, match: str) -> str:
     if state == "minimized":
         _osascript(
             f'tell application "System Events" to set value of attribute "AXMinimized" '
-            f'of front window of ({selector}) to true'
+            f"of front window of ({selector}) to true"
         )
         return "minimized"
 
@@ -392,7 +425,7 @@ def _apply_darwin(spec: dict[str, Any], pid: int | None, match: str) -> str:
         return "no position requested"
     _osascript(
         f'tell application "System Events" to tell front window of ({selector}) to '
-        f'set {{position, size}} to {{{{{rect.x}, {rect.y}}}, {{{rect.width}, {rect.height}}}}}'
+        f"set {{position, size}} to {{{{{rect.x}, {rect.y}}}, {{{rect.width}, {rect.height}}}}}"
     )
     if spec.get("workspace") is not None:
         log.info("workspace placement is not supported on macOS — ignored")

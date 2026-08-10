@@ -5,6 +5,7 @@ the config directory. `palaunch sync` commits local edits, rebases on the
 remote and pushes — the same three commands you would type, with the error
 messages surfaced instead of swallowed.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -29,8 +30,11 @@ def _git(*args: str, cwd: Path | None = None, check: bool = True) -> str:
         proc = subprocess.run(
             ["git", *args],
             cwd=str(cwd or profiles_dir()),
-            capture_output=True, text=True, timeout=120,
-            check=False, creationflags=_NO_WINDOW,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+            creationflags=_NO_WINDOW,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise SyncError(str(exc)) from exc
@@ -104,7 +108,9 @@ def sync(message: str = "", push: bool = True) -> str:
     # Rebase keeps a linear history across machines; a merge commit per sync
     # would bury the actual profile edits.
     rebase = _git("rebase", f"origin/{branch}", check=False)
-    steps.append("rebased on origin" if "up to date" not in rebase.lower() else "already up to date")
+    steps.append(
+        "rebased on origin" if "up to date" not in rebase.lower() else "already up to date"
+    )
 
     if push:
         _git("push", "-u", "origin", branch)

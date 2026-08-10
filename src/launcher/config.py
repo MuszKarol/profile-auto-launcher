@@ -1,4 +1,5 @@
 """Profile configuration loading and schema validation."""
+
 from __future__ import annotations
 
 import os
@@ -14,10 +15,23 @@ from platformdirs import user_config_dir
 APP_NAME = "profile-auto-launcher"
 PLATFORM = platform.system().lower()  # 'windows', 'linux', 'darwin'
 
-KNOWN_STEP_TYPES = frozenset({
-    "app", "command", "script", "url", "env", "kill", "wait", "wait_for",
-    "profile", "notify", "http", "plugin", "file",
-})
+KNOWN_STEP_TYPES = frozenset(
+    {
+        "app",
+        "command",
+        "script",
+        "url",
+        "env",
+        "kill",
+        "wait",
+        "wait_for",
+        "profile",
+        "notify",
+        "http",
+        "plugin",
+        "file",
+    }
+)
 
 # Steps that must carry at least one of these keys to be runnable at all.
 REQUIRED_STEP_FIELDS: dict[str, tuple[str, ...]] = {
@@ -34,15 +48,38 @@ REQUIRED_STEP_FIELDS: dict[str, tuple[str, ...]] = {
     "file": ("action",),
 }
 
-KNOWN_PROFILE_KEYS = frozenset({
-    "name", "description", "icon", "default", "autostart", "tags", "vars",
-    "hotkey", "triggers", "steps", "teardown", "extends",
-})
+KNOWN_PROFILE_KEYS = frozenset(
+    {
+        "name",
+        "description",
+        "icon",
+        "default",
+        "autostart",
+        "tags",
+        "vars",
+        "hotkey",
+        "triggers",
+        "steps",
+        "teardown",
+        "extends",
+    }
+)
 
-KNOWN_WINDOW_KEYS = frozenset({
-    "monitor", "position", "workspace", "state", "x", "y", "width", "height",
-    "match", "timeout", "focus",
-})
+KNOWN_WINDOW_KEYS = frozenset(
+    {
+        "monitor",
+        "position",
+        "workspace",
+        "state",
+        "x",
+        "y",
+        "width",
+        "height",
+        "match",
+        "timeout",
+        "focus",
+    }
+)
 
 KNOWN_TRIGGER_KEYS = frozenset({"at", "every", "weekday", "when", "name"})
 
@@ -50,8 +87,20 @@ KNOWN_FILE_ACTIONS = frozenset({"copy", "symlink", "mkdir", "remove", "write", "
 
 # Values may be written as {windows: …, linux: …, darwin: …, default: …}
 PLATFORM_KEYED_FIELDS = (
-    "path", "run", "cwd", "url", "process", "script", "src", "dest",
-    "plugin", "title", "message", "content", "profile", "action",
+    "path",
+    "run",
+    "cwd",
+    "url",
+    "process",
+    "script",
+    "src",
+    "dest",
+    "plugin",
+    "title",
+    "message",
+    "content",
+    "profile",
+    "action",
 )
 
 
@@ -106,7 +155,7 @@ class Step:
     retries: int = 0  # extra attempts after a failure
     retry_delay: float = 0.0  # seconds before the first retry (doubles each time)
     when: dict[str, Any] | None = None  # skip the step unless all conditions hold
-    on_failure: list["Step"] = field(default_factory=list)  # compensation steps
+    on_failure: list[Step] = field(default_factory=list)  # compensation steps
     # type=wait_for
     interval: float = 1.0  # poll interval in seconds
     # type=url
@@ -197,9 +246,7 @@ def _coerce_step(raw: dict[str, Any]) -> Step:
         raise ValueError(f"step must be a mapping, got {type(raw).__name__}")
     typ = raw.get("type")
     if typ not in KNOWN_STEP_TYPES:
-        raise ValueError(
-            f"unknown step type {typ!r}; allowed: {sorted(KNOWN_STEP_TYPES)}"
-        )
+        raise ValueError(f"unknown step type {typ!r}; allowed: {sorted(KNOWN_STEP_TYPES)}")
     step = Step(type=typ, name=raw.get("name", ""), id=str(raw.get("id", "")))
     for key in PLATFORM_KEYED_FIELDS:
         if key in raw:
@@ -339,7 +386,9 @@ def _resolve_extends(data: dict[str, Any], directory: Path, seen: set[Path]) -> 
     # each other in discovery; a child without `name:` falls back to its stem.
     not_inherited = ("default", "autostart", "name", "hotkey")
     merged = {k: v for k, v in parent.items() if k not in not_inherited}
-    merged.update({k: v for k, v in data.items() if k not in ("steps", "teardown", "extends", "vars")})
+    merged.update(
+        {k: v for k, v in data.items() if k not in ("steps", "teardown", "extends", "vars")}
+    )
     merged["steps"] = list(parent.get("steps") or []) + list(data.get("steps") or [])
     merged["teardown"] = list(parent.get("teardown") or []) + list(data.get("teardown") or [])
     merged["vars"] = {**(parent.get("vars") or {}), **(data.get("vars") or {})}
@@ -385,9 +434,7 @@ def _check_step_ids(steps: list[Step]) -> None:
     for step in steps:
         for dep in step.depends_on:
             if dep not in ids:
-                raise ValueError(
-                    f"step '{step.label}' depends_on unknown id '{dep}'"
-                )
+                raise ValueError(f"step '{step.label}' depends_on unknown id '{dep}'")
             if dep == step.id:
                 raise ValueError(f"step '{step.label}' depends on itself")
 

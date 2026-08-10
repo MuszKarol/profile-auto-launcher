@@ -4,6 +4,7 @@
 the only way to find out why a step failed. Every profile run writes there;
 the console handler is added only when a terminal is actually attached.
 """
+
 from __future__ import annotations
 
 import logging

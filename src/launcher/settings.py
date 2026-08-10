@@ -8,6 +8,7 @@ Precedence, highest first:
 
 Reading is cached per-process; call :func:`reload` after writing the file.
 """
+
 from __future__ import annotations
 
 import os
@@ -129,9 +130,7 @@ def save(values: dict[str, Any]) -> None:
     raw.update(values)
     path = settings_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        yaml.safe_dump(raw, sort_keys=True, allow_unicode=True), encoding="utf-8"
-    )
+    path.write_text(yaml.safe_dump(raw, sort_keys=True, allow_unicode=True), encoding="utf-8")
     reload()
 
 

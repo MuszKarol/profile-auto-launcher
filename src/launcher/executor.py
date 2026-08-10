@@ -11,6 +11,7 @@ Apps and URLs are launch-and-forget (detached) so the launcher doesn't block
 on long-lived processes; pids of tracked spawns are recorded so `palaunch
 stop` can close what a profile opened.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -25,9 +26,10 @@ import time
 import urllib.error
 import urllib.request
 import webbrowser
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any
 
 from launcher import conditions, interp
 from launcher.config import PLATFORM, Profile, Step
@@ -214,9 +216,7 @@ async def _exec_argv(step: Step, run: RunContext, argv: list[str]) -> StepResult
             suffix = f": {tail[-1][:160]}" if tail else ""
             return StepResult(step, True, run.scrub(f"exit 0{suffix}"))
         message = stderr.decode(errors="replace").strip() or stdout.decode(errors="replace").strip()
-        return StepResult(
-            step, False, run.scrub(f"exit {process.returncode}: {message[:400]}")
-        )
+        return StepResult(step, False, run.scrub(f"exit {process.returncode}: {message[:400]}"))
     except FileNotFoundError:
         return StepResult(step, False, f"not found: {argv[0]}")
     except OSError as exc:
@@ -251,12 +251,16 @@ async def _run_script(step: Step, run: RunContext) -> StepResult:
     body = _value(step.script, run)
     if not body:
         return StepResult(step, False, "empty script")
-    shell = step.shell if step.shell != "auto" else ("powershell" if PLATFORM == "windows" else "bash")
+    shell = (
+        step.shell if step.shell != "auto" else ("powershell" if PLATFORM == "windows" else "bash")
+    )
     suffix = _SHELL_SUFFIX.get(shell, ".sh")
 
     import tempfile
 
-    handle = tempfile.NamedTemporaryFile(
+    # delete=False on purpose: the interpreter opens the path by name after we
+    # close it, so the file has to outlive the handle. The `finally` unlinks it.
+    handle = tempfile.NamedTemporaryFile(  # noqa: SIM115
         "w", suffix=suffix, delete=False, encoding="utf-8", newline="\n"
     )
     try:
@@ -323,7 +327,9 @@ async def _kill_process(step: Step, run: RunContext) -> StepResult:
         if PLATFORM == "windows":
             subprocess.run(
                 ["taskkill", "/F", "/IM", process],
-                capture_output=True, check=False, creationflags=_NO_WINDOW,
+                capture_output=True,
+                check=False,
+                creationflags=_NO_WINDOW,
             )
         else:
             # `-x` requires whole-name match; re.escape neuters regex metacharacters
@@ -332,7 +338,8 @@ async def _kill_process(step: Step, run: RunContext) -> StepResult:
             # regex match against the full command line is alarmingly broad.
             subprocess.run(
                 ["pkill", "-x", re.escape(process)],
-                capture_output=True, check=False,
+                capture_output=True,
+                check=False,
             )
         return StepResult(step, True, f"kill {process}")
     except OSError as exc:
@@ -366,8 +373,10 @@ def _probe_http(url: str) -> bool:
 async def _probe_command(argv: list[str], env: dict[str, str]) -> bool:
     try:
         proc = await asyncio.create_subprocess_exec(
-            *argv, env=env,
-            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+            *argv,
+            env=env,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
             creationflags=_NO_WINDOW,
         )
         return await proc.wait() == 0
@@ -388,7 +397,7 @@ async def _wait_for(step: Step, run: RunContext) -> StepResult:
         if target:
             scheme = target.split(":", 1)[0].lower()
             if scheme == "tcp":
-                hostport = target[len("tcp://"):]
+                hostport = target[len("tcp://") :]
                 host, _, port = hostport.rpartition(":")
                 if not host or not port.isdigit():
                     return False
@@ -432,9 +441,13 @@ async def _run_nested_profile(step: Step, run: RunContext) -> StepResult:
     )
     child.ctx.secrets_used = run.ctx.secrets_used
     results = await _execute_steps(nested.steps, child)
-    failed = sum(1 for r in results if r.counts_as_failure)
-    detail = f"{nested.name}: {len(results) - failed} ok, {failed} failed"
-    return StepResult(step, failed == 0, detail)
+    failures = [r for r in results if r.counts_as_failure]
+    detail = f"{nested.name}: {len(results) - len(failures)} ok, {len(failures)} failed"
+    if failures:
+        # Surface the first reason: otherwise a nested failure reads as a bare
+        # count and you have to go digging through the log to learn why.
+        detail += f" — {failures[0].step.label}: {failures[0].detail}"
+    return StepResult(step, not failures, detail)
 
 
 async def _notify_step(step: Step, run: RunContext) -> StepResult:
@@ -446,7 +459,9 @@ async def _notify_step(step: Step, run: RunContext) -> StepResult:
     return StepResult(step, True, run.scrub(f"{title} — {message}"[:200]))
 
 
-def _http_request(step: Step, url: str, headers: dict[str, str], body: bytes | None, timeout: float):
+def _http_request(
+    step: Step, url: str, headers: dict[str, str], body: bytes | None, timeout: float
+):
     request = urllib.request.Request(url, data=body, method=step.method, headers=headers)
     return urllib.request.urlopen(request, timeout=timeout)
 
@@ -503,16 +518,19 @@ async def _plugin_step(step: Step, run: RunContext) -> StepResult:
     if not Path(resolved).is_file():
         return StepResult(step, False, f"plugin not found: {executable}")
 
-    request = json.dumps({
-        "profile": run.profile.name,
-        "step": step.label,
-        "config": interp.render_any(step.config, run.ctx),
-        "env": dict(run.env),
-    }).encode("utf-8")
+    request = json.dumps(
+        {
+            "profile": run.profile.name,
+            "step": step.label,
+            "config": interp.render_any(step.config, run.ctx),
+            "env": dict(run.env),
+        }
+    ).encode("utf-8")
 
     try:
         proc = await asyncio.create_subprocess_exec(
-            resolved, *_values(step.args, run),
+            resolved,
+            *_values(step.args, run),
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -520,9 +538,7 @@ async def _plugin_step(step: Step, run: RunContext) -> StepResult:
             cwd=_value(step.cwd, run),
             creationflags=_NO_WINDOW,
         )
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(request), step.timeout or 60.0
-        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(request), step.timeout or 60.0)
     except asyncio.TimeoutError:
         proc.kill()
         await proc.wait()
@@ -671,7 +687,9 @@ async def _run_step(
     result.attempts = attempt + 1
 
     if not result.ok and step.on_failure:
-        log.info("step %s failed — running %d compensation step(s)", step.label, len(step.on_failure))
+        log.info(
+            "step %s failed — running %d compensation step(s)", step.label, len(step.on_failure)
+        )
         recovery = await _execute_steps(step.on_failure, run, on_result)
         healed = sum(1 for r in recovery if r.counts_as_failure)
         result.detail += f" [on_failure: {len(recovery) - healed}/{len(recovery)} ok]"
@@ -724,15 +742,13 @@ async def _execute_steps(
 
     async def run_indexed(i: int) -> StepResult:
         step = steps[i]
-        blocked = [
-            d for d in deps[i]
-            if results[d] is not None and results[d].counts_as_failure
-        ]
+        blocked = [d for d in deps[i] if results[d] is not None and results[d].counts_as_failure]
         # Only explicit edges cascade — implicit ones would turn any single
         # failure into a skipped remainder, which is not what a launcher wants.
         if step.depends_on and blocked:
             return StepResult(
-                step, True,
+                step,
+                True,
                 f"skipped — '{steps[blocked[0]].label}' failed",
                 skipped=True,
             )
@@ -797,7 +813,9 @@ def describe_step(step: Step) -> str:
     if step.type == "wait":
         return f"sleep {step.seconds}s"
     if step.type == "wait_for":
-        target = step.url or (step.run if isinstance(step.run, str) else " ".join(_as_argv(step.run)))
+        target = step.url or (
+            step.run if isinstance(step.run, str) else " ".join(_as_argv(step.run))
+        )
         return f"poll {target} until ready (≤{step.timeout or 30.0}s)"
     if step.type == "profile":
         return f"run nested profile '{step.profile}'"
@@ -853,9 +871,9 @@ def _filter_steps(
         return {v.lower() for v in (step.name, step.id, step.type) if v}
 
     chosen = [
-        step for step in steps
-        if (not only_set or identifiers(step) & only_set)
-        and not (identifiers(step) & skip_set)
+        step
+        for step in steps
+        if (not only_set or identifiers(step) & only_set) and not (identifiers(step) & skip_set)
     ]
     surviving_ids = {step.id for step in chosen if step.id}
     for step in chosen:
@@ -903,7 +921,10 @@ def run_profile(
     failed = sum(1 for r in results if r.counts_as_failure)
     log.info(
         "profile '%s' finished in %.2fs — %d ok, %d failed",
-        profile.name, duration, len(results) - failed, failed,
+        profile.name,
+        duration,
+        len(results) - failed,
+        failed,
     )
     return results
 
@@ -934,7 +955,9 @@ def stop_profile(
 
     results = run_teardown(profile, on_result)
     stopped, stubborn = procs.stop_profile(profile.name)
-    log.info("stopped profile '%s': %d processes ended, %d survived", profile.name, stopped, stubborn)
+    log.info(
+        "stopped profile '%s': %d processes ended, %d survived", profile.name, stopped, stubborn
+    )
     return results, stopped, stubborn
 
 

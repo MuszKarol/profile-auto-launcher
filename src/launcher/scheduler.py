@@ -13,11 +13,12 @@ scheduled minute — starting the tray at 18:00 must not replay the 09:00
 trigger. `every:` measures from the previous fire, and the first interval is
 counted from when the scheduler started rather than firing immediately.
 """
+
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from datetime import datetime, timedelta
-from typing import Callable
 
 from launcher import conditions
 from launcher.config import Profile, Trigger, parse_duration
@@ -74,9 +75,7 @@ def is_due(
 
     if trigger.at:
         hour, _, minute = trigger.at.partition(":")
-        scheduled = now.replace(
-            hour=int(hour), minute=int(minute), second=0, microsecond=0
-        )
+        scheduled = now.replace(hour=int(hour), minute=int(minute), second=0, microsecond=0)
         if now < scheduled or now - scheduled > CATCH_UP:
             return False
         if last is not None and last >= scheduled:
@@ -91,8 +90,8 @@ def is_due(
     else:
         return False
 
-    if trigger.when and not conditions.matches(trigger.when, env if env is not None else {}):
-        return False
+    if trigger.when:
+        return conditions.matches(trigger.when, env if env is not None else {})
     return True
 
 
@@ -147,7 +146,9 @@ class Scheduler:
                 log.info("trigger '%s' fired profile '%s'", label, profile.name)
                 fired.append(profile)
                 threading.Thread(
-                    target=self._execute, args=(profile,), daemon=True,
+                    target=self._execute,
+                    args=(profile,),
+                    daemon=True,
                 ).start()
                 break  # one firing per profile per tick
         return fired

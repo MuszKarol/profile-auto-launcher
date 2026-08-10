@@ -7,6 +7,7 @@ PIDs get recycled, so each record also stores the launch timestamp and the
 command line. Liveness is checked with the cheapest reliable primitive per
 platform — a signal-0 probe on POSIX, `OpenProcess` + wait on Windows.
 """
+
 from __future__ import annotations
 
 import json
@@ -15,6 +16,7 @@ import signal
 import subprocess
 import time
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any
 
 from launcher.config import PLATFORM, config_dir
@@ -34,7 +36,7 @@ class TrackedProc:
     started_at: float = field(default_factory=time.time)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "TrackedProc":
+    def from_dict(cls, data: dict[str, Any]) -> TrackedProc:
         return cls(
             pid=int(data.get("pid", 0)),
             label=str(data.get("label", "")),
@@ -59,7 +61,36 @@ def is_alive(pid: int) -> bool:
         return True  # exists, owned by someone else
     except OSError:
         return False
-    return True
+    # The tray spawns children and never waits on them, so a terminated child
+    # lingers as a zombie that signal-0 still reports as alive. Nothing is
+    # running behind that pid, so it must count as dead.
+    return not _is_zombie(pid)
+
+
+def _is_zombie(pid: int) -> bool:
+    if PLATFORM == "linux":
+        try:
+            stat = Path(f"/proc/{pid}/stat").read_text()
+        except OSError:
+            return False
+        # "pid (comm) state …" — comm may itself contain spaces or brackets,
+        # so the state is the first field after the closing parenthesis.
+        _, _, rest = stat.partition(")")
+        fields = rest.split()
+        return bool(fields) and fields[0] == "Z"
+    if PLATFORM == "darwin":
+        try:
+            proc = subprocess.run(
+                ["ps", "-o", "state=", "-p", str(pid)],
+                capture_output=True,
+                text=True,
+                timeout=3,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return proc.stdout.strip().startswith("Z")
+    return False
 
 
 def _is_alive_windows(pid: int) -> bool:  # pragma: no cover - Windows only
@@ -85,7 +116,9 @@ def terminate(pid: int, grace: float = 5.0) -> bool:
         if PLATFORM == "windows":
             subprocess.run(
                 ["taskkill", "/T", "/PID", str(pid)],
-                capture_output=True, check=False, creationflags=_NO_WINDOW,
+                capture_output=True,
+                check=False,
+                creationflags=_NO_WINDOW,
             )
         else:
             os.kill(pid, signal.SIGTERM)
@@ -102,7 +135,9 @@ def terminate(pid: int, grace: float = 5.0) -> bool:
         if PLATFORM == "windows":
             subprocess.run(
                 ["taskkill", "/F", "/T", "/PID", str(pid)],
-                capture_output=True, check=False, creationflags=_NO_WINDOW,
+                capture_output=True,
+                check=False,
+                creationflags=_NO_WINDOW,
             )
         else:
             os.kill(pid, signal.SIGKILL)

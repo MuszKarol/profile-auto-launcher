@@ -5,12 +5,13 @@ Enter to run, Ctrl+E to edit, Ctrl+K to stop a running profile, Esc to close.
 After picking, the HUD streams per-step results live, so you see exactly which
 steps succeeded — then auto-closes on success.
 """
+
 from __future__ import annotations
 
 import queue
 import threading
 import tkinter as tk
-from typing import Callable
+from collections.abc import Callable
 
 from launcher import theme
 from launcher.config import Profile
@@ -87,7 +88,7 @@ class _Hud:
         # from the pynput listener thread — Tk itself is not thread-safe, so
         # the flag is polled from inside the Tk loop instead).
         self._close_event = threading.Event()
-        self.results_q: "queue.Queue[StepResult | None]" = queue.Queue()
+        self.results_q: queue.Queue[StepResult | None] = queue.Queue()
 
         self.root = tk.Tk()
         self.root.withdraw()
@@ -137,14 +138,19 @@ class _Hud:
         pal = self.pal
         header = tk.Frame(self.outer, bg=pal.bg)
         header.pack(fill="x")
-        tk.Label(
-            header, text="◈", bg=pal.bg, fg=pal.accent, font=(self.font, 14, "bold")
-        ).pack(side="left", padx=(0, 8))
+        tk.Label(header, text="◈", bg=pal.bg, fg=pal.accent, font=(self.font, 14, "bold")).pack(
+            side="left", padx=(0, 8)
+        )
 
         self.query = tk.StringVar()
         self.entry = tk.Entry(
-            header, textvariable=self.query, bg=pal.bg, fg=pal.fg,
-            insertbackground=pal.accent, relief="flat", font=(self.font, 15),
+            header,
+            textvariable=self.query,
+            bg=pal.bg,
+            fg=pal.fg,
+            insertbackground=pal.accent,
+            relief="flat",
+            font=(self.font, 15),
             highlightthickness=0,
         )
         self.entry.pack(side="left", fill="x", expand=True, ipady=6)
@@ -169,7 +175,9 @@ class _Hud:
         self.footer = tk.Label(
             self.outer,
             text="↑↓ navigate    ⏎ run    → preview    ctrl+e edit    ctrl+k stop    esc close",
-            bg=pal.bg, fg=pal.muted, font=(self.font, 9),
+            bg=pal.bg,
+            fg=pal.muted,
+            font=(self.font, 9),
         )
         self.footer.pack(anchor="w", pady=(10, 0))
 
@@ -228,7 +236,10 @@ class _Hud:
         if not self.filtered:
             empty = tk.Frame(self.list_frame, bg=pal.bg)
             tk.Label(
-                empty, text="No matching profiles", bg=pal.bg, fg=pal.muted,
+                empty,
+                text="No matching profiles",
+                bg=pal.bg,
+                fg=pal.muted,
                 font=(self.font, 11),
             ).pack(pady=24)
             empty.pack(fill="x")
@@ -261,21 +272,25 @@ class _Hud:
         ).pack(fill="x")
         if p.description:
             tk.Label(
-                text, text=p.description, bg=pal.panel, fg=pal.muted,
-                font=(self.font, 9), anchor="w",
+                text,
+                text=p.description,
+                bg=pal.panel,
+                fg=pal.muted,
+                font=(self.font, 9),
+                anchor="w",
             ).pack(fill="x")
 
         tk.Label(
             row, text=f"{len(p.steps)} steps", bg=pal.panel, fg=pal.muted, font=(self.font, 9)
         ).pack(side="right")
         if p.name in self.active:
-            tk.Label(
-                row, text="● running", bg=pal.panel, fg=pal.ok, font=(self.font, 9)
-            ).pack(side="right", padx=(0, 10))
+            tk.Label(row, text="● running", bg=pal.panel, fg=pal.ok, font=(self.font, 9)).pack(
+                side="right", padx=(0, 10)
+            )
         elif p.name == self.last_profile:
-            tk.Label(
-                row, text="↺ recent", bg=pal.panel, fg=pal.accent, font=(self.font, 9)
-            ).pack(side="right", padx=(0, 10))
+            tk.Label(row, text="↺ recent", bg=pal.panel, fg=pal.accent, font=(self.font, 9)).pack(
+                side="right", padx=(0, 10)
+            )
 
         def set_bg(color: str) -> None:
             for widget in (row, text, *row.winfo_children(), *text.winfo_children()):
@@ -330,13 +345,21 @@ class _Hud:
             return
         profile = self.filtered[self.index]
         tk.Label(
-            self.preview_frame, text=profile.name, bg=pal.panel, fg=pal.fg,
-            font=(self.font, 11, "bold"), anchor="w",
+            self.preview_frame,
+            text=profile.name,
+            bg=pal.panel,
+            fg=pal.fg,
+            font=(self.font, 11, "bold"),
+            anchor="w",
         ).pack(fill="x")
         if profile.tags:
             tk.Label(
-                self.preview_frame, text=" · ".join(profile.tags), bg=pal.panel,
-                fg=pal.muted, font=(self.font, 9), anchor="w",
+                self.preview_frame,
+                text=" · ".join(profile.tags),
+                bg=pal.panel,
+                fg=pal.muted,
+                font=(self.font, 9),
+                anchor="w",
             ).pack(fill="x", pady=(0, 6))
 
         shown = profile.steps[:14]
@@ -345,19 +368,30 @@ class _Hud:
             line.pack(fill="x", pady=1)
             glyph = "○" if not step.enabled else ("⇉" if step.parallel else "→")
             tk.Label(
-                line, text=glyph, bg=pal.panel,
+                line,
+                text=glyph,
+                bg=pal.panel,
                 fg=pal.muted if not step.enabled else pal.accent,
-                font=(self.font, 9), width=2,
+                font=(self.font, 9),
+                width=2,
             ).pack(side="left")
             tk.Label(
-                line, text=describe_step(step)[:64], bg=pal.panel,
+                line,
+                text=describe_step(step)[:64],
+                bg=pal.panel,
                 fg=pal.muted if not step.enabled else pal.fg,
-                font=(self.mono, 8), anchor="w", justify="left",
+                font=(self.mono, 8),
+                anchor="w",
+                justify="left",
             ).pack(side="left", fill="x", expand=True)
         if len(profile.steps) > len(shown):
             tk.Label(
-                self.preview_frame, text=f"… +{len(profile.steps) - len(shown)} more",
-                bg=pal.panel, fg=pal.muted, font=(self.font, 9), anchor="w",
+                self.preview_frame,
+                text=f"… +{len(profile.steps) - len(shown)} more",
+                bg=pal.panel,
+                fg=pal.muted,
+                font=(self.font, 9),
+                anchor="w",
             ).pack(fill="x", pady=(4, 0))
 
     # ── secondary actions ────────────────────────────────────────────────
@@ -425,7 +459,10 @@ class _Hud:
             header, text=profile.icon or "◈", bg=pal.bg, fg=pal.accent, font=(self.font, 14)
         ).pack(side="left", padx=(0, 8))
         tk.Label(
-            header, text=f"{verb} {profile.name}…", bg=pal.bg, fg=pal.fg,
+            header,
+            text=f"{verb} {profile.name}…",
+            bg=pal.bg,
+            fg=pal.fg,
             font=(self.font, 14, "bold"),
         ).pack(side="left")
 
@@ -435,8 +472,11 @@ class _Hud:
         self.progress_frame.pack(fill="both", expand=True)
 
         self.status = tk.Label(
-            self.outer, text="esc hide window (steps keep running)",
-            bg=pal.bg, fg=pal.muted, font=(self.font, 9),
+            self.outer,
+            text="esc hide window (steps keep running)",
+            bg=pal.bg,
+            fg=pal.muted,
+            font=(self.font, 9),
         )
         self.status.pack(anchor="w", pady=(10, 0))
         self.root.bind("<Escape>", lambda _e: self.root.destroy())
@@ -479,9 +519,9 @@ class _Hud:
             glyph, color = "✓", pal.ok
         else:
             glyph, color = "✗", pal.err
-        tk.Label(
-            row, text=glyph, bg=pal.bg, fg=color, font=(self.font, 11, "bold"), width=2
-        ).pack(side="left")
+        tk.Label(row, text=glyph, bg=pal.bg, fg=color, font=(self.font, 11, "bold"), width=2).pack(
+            side="left"
+        )
         tk.Label(
             row, text=res.step.label, bg=pal.bg, fg=pal.fg, font=(self.font, 10), anchor="w"
         ).pack(side="left")
@@ -497,9 +537,7 @@ class _Hud:
             self.exit_code = 0
             self.root.after(1400, self.root.destroy)
         else:
-            self.status.configure(
-                text=f"✗ {failed} step(s) failed — esc to close", fg=self.pal.err
-            )
+            self.status.configure(text=f"✗ {failed} step(s) failed — esc to close", fg=self.pal.err)
             self.exit_code = 1
 
     def run(self) -> None:

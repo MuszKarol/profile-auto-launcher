@@ -5,11 +5,13 @@ profile, per-profile run counts). `history.jsonl` holds one JSON object per
 run — appended, trimmed to a bounded number of lines, and never read on the
 hot path.
 """
+
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from datetime import datetime
-from typing import Any, Iterable
+from typing import Any
 
 from launcher.config import config_dir
 
@@ -67,9 +69,7 @@ def _step_record(res: Any) -> dict[str, Any]:
     }
 
 
-def _append_history(
-    profile_name: str, results: Iterable[Any], duration: float, kind: str
-) -> None:
+def _append_history(profile_name: str, results: Iterable[Any], duration: float, kind: str) -> None:
     from launcher import settings
 
     steps = [_step_record(r) for r in results]
@@ -136,8 +136,13 @@ def step_stats(profile: str | None = None, limit: int = 200) -> list[dict[str, A
             bucket = buckets.setdefault(
                 key,
                 {
-                    "profile": key[0], "step": key[1], "type": step.get("type", ""),
-                    "runs": 0, "failures": 0, "total_duration": 0.0, "max_duration": 0.0,
+                    "profile": key[0],
+                    "step": key[1],
+                    "type": step.get("type", ""),
+                    "runs": 0,
+                    "failures": 0,
+                    "total_duration": 0.0,
+                    "max_duration": 0.0,
                 },
             )
             if step.get("skipped"):

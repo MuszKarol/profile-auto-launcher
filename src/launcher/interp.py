@@ -20,6 +20,7 @@ An unknown placeholder is left untouched rather than replaced by an empty
 string — silently dropping a token from a command line is how you end up
 running `rm -rf ` with the wrong argument list.
 """
+
 from __future__ import annotations
 
 import getpass
@@ -51,7 +52,7 @@ class Context:
     secrets_used: set[str] = field(default_factory=set)
 
     @classmethod
-    def for_profile(cls, profile, env: dict[str, str]) -> "Context":
+    def for_profile(cls, profile, env: dict[str, str]) -> Context:
         return cls(
             profile_name=profile.name,
             profile_fields={
