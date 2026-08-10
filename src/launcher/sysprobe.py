@@ -70,10 +70,27 @@ def processes() -> list[tuple[int, str, str]]:
     found = []
     for line in out.splitlines():
         pid, _, comm = line.strip().partition(" ")
-        if pid.isdigit():
-            name = comm.strip()
-            found.append((int(pid), Path(name).name, name if "/" in name else ""))
+        if not pid.isdigit():
+            continue
+        name = comm.strip()
+        found.append((int(pid), Path(name).name, _exe_path(int(pid), name)))
     return found
+
+
+def _exe_path(pid: int, fallback: str) -> str:
+    """`ps` reports a bare command name; /proc has the real binary path.
+
+    A recorded profile is only reusable if it points at an actual executable,
+    so this is worth the extra readlink per process on Linux.
+    """
+    if PLATFORM == "linux":
+        try:
+            import os
+
+            return os.readlink(f"/proc/{pid}/exe")
+        except OSError:
+            pass
+    return fallback if "/" in fallback else ""
 
 
 def process_names() -> set[str]:

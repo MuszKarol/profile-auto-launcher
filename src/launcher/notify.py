@@ -27,7 +27,9 @@ def _ps_quote(text: str) -> str:
 
 
 def notify(title: str, body: str) -> None:
-    if os.environ.get("PAL_NOTIFY") == "0":
+    from launcher import settings
+
+    if not settings.load().notifications:
         return
     try:
         if PLATFORM == "windows":
