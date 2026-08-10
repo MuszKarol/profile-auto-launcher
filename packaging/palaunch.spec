@@ -10,7 +10,15 @@
 # ever imported inside functions — PyInstaller's static scan would miss them
 # and the frozen build would silently lose the tray, hotkeys and secrets.
 
+import os
+
 from PyInstaller.utils.hooks import collect_submodules
+
+# PyInstaller resolves relative paths against the working directory, not the
+# spec file, so `pyinstaller packaging/palaunch.spec` from the repo root would
+# otherwise look for sources one level above the repo. SPECPATH is injected by
+# PyInstaller and always points at this file's directory.
+SRC = os.path.join(SPECPATH, "..", "src")  # noqa: F821 - injected by PyInstaller
 
 hidden = [
     "launcher.editor",
@@ -29,8 +37,8 @@ for optional in ("pystray", "PIL", "pynput", "keyring", "psutil"):
         pass  # building without an extra installed is fine
 
 analysis = Analysis(
-    ["../src/launcher/__main__.py"],
-    pathex=["../src"],
+    [os.path.join(SRC, "launcher", "__main__.py")],
+    pathex=[SRC],
     binaries=[],
     datas=[],
     hiddenimports=hidden,

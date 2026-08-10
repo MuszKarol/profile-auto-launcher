@@ -402,6 +402,10 @@ def _cmd_where(_args: argparse.Namespace) -> int:
     print(f"log file:     {log_path()}")
     print(f"history:      {history_path()}")
     print(f"schema:       {schema.schema_path()}")
+
+    from launcher import windows
+
+    print(f"window backend: {windows.backend_name()}")
     print("\nhotkeys:")
     for line in hotkey.describe(discover_profiles()):
         print(f"  {line}")
@@ -769,7 +773,20 @@ def main(argv: list[str] | None = None) -> int:
     _force_utf8_stdio()
     parser = build_parser()
     args = parser.parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except BrokenPipeError:
+        # `palaunch history | head` closes the pipe while we are still
+        # printing. Point the rest of stdout at devnull so the interpreter's
+        # shutdown flush cannot raise a second time and print a traceback.
+        try:
+            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        except OSError:
+            pass
+        return 0
+    except KeyboardInterrupt:
+        print(file=sys.stderr)
+        return 130
 
 
 if __name__ == "__main__":

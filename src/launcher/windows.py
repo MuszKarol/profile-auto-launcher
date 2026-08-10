@@ -7,17 +7,28 @@ window the process opens::
       monitor: 2            # 1-based; defaults to the primary display
       position: left-half   # left/right/top/bottom-half, maximized, fullscreen,
                             # center, full, or explicit x/y/width/height
-      workspace: 3          # X11 only
+      workspace: 3          # virtual desktop / space, 1-based
       match: "Visual Studio"  # title substring, when the pid owns several windows
       timeout: 10           # seconds to wait for the window to appear
 
-Backends: ctypes/user32 on Windows, `wmctrl`+`xdotool` on X11, AppleScript on
-macOS. Anything missing degrades to a logged "skipped" — a window that ends up
-in the wrong place must never fail a profile.
+Backends by session:
+
+===========  =====================================  ==========================
+Session      Geometry                               `workspace:`
+===========  =====================================  ==========================
+Windows      user32 (SetWindowPos/ShowWindow)       IVirtualDesktopManager
+X11          wmctrl + xdotool                       wmctrl
+Wayland      per compositor, see `launcher.wayland` per compositor
+macOS        AppleScript / System Events            yabai, when installed
+===========  =====================================  ==========================
+
+Anything missing degrades to a logged "skipped" — a window that ends up in the
+wrong place must never fail a profile.
 """
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import time
@@ -264,9 +275,99 @@ def _apply_windows(spec: dict[str, Any], pid: int | None, match: str) -> str:  #
         user32.ShowWindow(hwnd, SW_MAXIMIZE)
     if spec.get("focus"):
         user32.SetForegroundWindow(hwnd)
+    detail = f"placed at {rect.x},{rect.y} {rect.width}x{rect.height}" if rect else "adjusted"
     if spec.get("workspace") is not None:
-        log.info("workspace placement is not supported on Windows — ignored")
-    return f"placed at {rect.x},{rect.y} {rect.width}x{rect.height}" if rect else "adjusted"
+        detail += f"; {_move_to_desktop_windows(hwnd, int(spec['workspace']))}"
+    return detail
+
+
+# Windows exposes MoveWindowToDesktop publicly but gives no public way to
+# enumerate desktops. Explorer keeps them, in display order, as concatenated
+# 16-byte GUIDs under this key — undocumented, but stable since Windows 10 and
+# the only route to a working `workspace: N`.
+_VIRTUAL_DESKTOP_KEY = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\VirtualDesktops"
+_VIRTUAL_DESKTOP_VALUE = "VirtualDesktopIDs"
+
+
+def parse_desktop_guids(blob: bytes) -> list[bytes]:
+    """Split the registry blob into 16-byte GUIDs, ignoring a ragged tail."""
+    return [bytes(blob[i : i + 16]) for i in range(0, len(blob) - 15, 16)]
+
+
+def _desktop_guids() -> list[bytes]:  # pragma: no cover - Windows only
+    import winreg
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _VIRTUAL_DESKTOP_KEY) as key:
+            blob, _kind = winreg.QueryValueEx(key, _VIRTUAL_DESKTOP_VALUE)
+    except OSError as exc:
+        raise WindowError(f"could not read the virtual desktop list: {exc}") from exc
+    guids = parse_desktop_guids(bytes(blob))
+    if not guids:
+        raise WindowError("the virtual desktop list is empty")
+    return guids
+
+
+def _move_to_desktop_windows(hwnd: int, index: int) -> str:  # pragma: no cover - Windows only
+    """Move a window to virtual desktop `index` (1-based)."""
+    import ctypes
+    from ctypes import wintypes
+
+    class GUID(ctypes.Structure):
+        _fields_ = [
+            ("Data1", ctypes.c_ulong),
+            ("Data2", ctypes.c_ushort),
+            ("Data3", ctypes.c_ushort),
+            ("Data4", ctypes.c_ubyte * 8),
+        ]
+
+    def guid_from_string(text: str) -> GUID:
+        value = GUID()
+        if ctypes.windll.ole32.CLSIDFromString(ctypes.c_wchar_p(text), ctypes.byref(value)):
+            raise WindowError(f"bad CLSID {text}")
+        return value
+
+    guids = _desktop_guids()
+    if not 1 <= index <= len(guids):
+        return f"workspace {index} does not exist ({len(guids)} desktops)"
+
+    ole32 = ctypes.windll.ole32
+    ole32.CoInitialize(None)
+    try:
+        clsid = guid_from_string("{AA509086-5CA9-4C25-8F95-589D3C07B48A}")
+        iid = guid_from_string("{A5CD92FF-29BE-454C-8D04-D82879FB3F1B}")
+        manager = ctypes.c_void_p()
+        CLSCTX_LOCAL_SERVER = 0x4
+        result = ole32.CoCreateInstance(
+            ctypes.byref(clsid),
+            None,
+            CLSCTX_LOCAL_SERVER,
+            ctypes.byref(iid),
+            ctypes.byref(manager),
+        )
+        if result or not manager:
+            raise WindowError(
+                f"IVirtualDesktopManager unavailable (hresult 0x{result & 0xFFFFFFFF:08x})"
+            )
+
+        # IUnknown occupies slots 0-2; MoveWindowToDesktop is the third method
+        # of IVirtualDesktopManager.
+        vtable = ctypes.cast(manager, ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p)))[0]
+        prototype = ctypes.WINFUNCTYPE(
+            ctypes.c_long, ctypes.c_void_p, wintypes.HWND, ctypes.POINTER(GUID)
+        )
+        move = prototype(vtable[5])
+        target = GUID.from_buffer_copy(guids[index - 1])
+        result = move(manager, hwnd, ctypes.byref(target))
+        if result:
+            # E_ACCESSDENIED shows up for windows whose owning process refuses
+            # cross-process moves; say so instead of reporting a silent success.
+            raise WindowError(
+                f"moving to desktop {index} was refused (hresult 0x{result & 0xFFFFFFFF:08x})"
+            )
+        return f"moved to desktop {index}"
+    finally:
+        ole32.CoUninitialize()
 
 
 # ── X11 backend ──────────────────────────────────────────────────────────
@@ -421,15 +522,56 @@ def _apply_darwin(spec: dict[str, Any], pid: int | None, match: str) -> str:
         return "minimized"
 
     rect = _target_rect(spec, _pick_monitor(_monitors_darwin(), spec))
-    if rect is None:
-        return "no position requested"
-    _osascript(
-        f'tell application "System Events" to tell front window of ({selector}) to '
-        f"set {{position, size}} to {{{{{rect.x}, {rect.y}}}, {{{rect.width}, {rect.height}}}}}"
-    )
+    detail = "no position requested"
+    if rect is not None:
+        _osascript(
+            f'tell application "System Events" to tell front window of ({selector}) to '
+            f"set {{position, size}} to {{{{{rect.x}, {rect.y}}}, {{{rect.width}, {rect.height}}}}}"
+        )
+        detail = f"placed at {rect.x},{rect.y} {rect.width}x{rect.height}"
     if spec.get("workspace") is not None:
-        log.info("workspace placement is not supported on macOS — ignored")
-    return f"placed at {rect.x},{rect.y} {rect.width}x{rect.height}"
+        detail += f"; {_move_to_space_darwin(pid, match, int(spec['workspace']))}"
+    return detail
+
+
+def yabai_window_id(windows_json: Any, pid: int | None, match: str) -> int | None:
+    """Window id from `yabai -m query --windows` output."""
+    needle = match.lower()
+    for window in windows_json or []:
+        if not isinstance(window, dict):
+            continue
+        if pid and window.get("pid") != pid:
+            continue
+        if needle and needle not in str(window.get("title", "")).lower():
+            continue
+        window_id = window.get("id")
+        if isinstance(window_id, int):
+            return window_id
+    return None
+
+
+def _move_to_space_darwin(pid: int | None, match: str, index: int) -> str:
+    """Move a window to a Space.
+
+    macOS has no public API for this — Mission Control is not scriptable and
+    even Apple's own shortcuts only switch Spaces, they don't move other
+    applications' windows. `yabai` is the established way to do it, so we drive
+    that when it is installed and say plainly what is missing when it is not.
+    """
+    if not shutil.which("yabai"):
+        raise WindowError(
+            "moving windows between Spaces needs yabai (brew install koekeishiya/formulae/yabai) "
+            "— macOS exposes no public Spaces API"
+        )
+    try:
+        payload = json.loads(_run(["yabai", "-m", "query", "--windows"], timeout=10))
+    except (ValueError, WindowError, OSError) as exc:
+        raise WindowError(f"yabai query failed: {exc}") from exc
+    window_id = yabai_window_id(payload, pid, match)
+    if window_id is None:
+        raise WindowError("yabai does not know about that window")
+    _run(["yabai", "-m", "window", str(window_id), "--space", str(index)], timeout=10)
+    return f"moved to space {index}"
 
 
 # ── entry point ──────────────────────────────────────────────────────────
@@ -447,8 +589,29 @@ def apply(spec: dict[str, Any], pid: int | None = None, match: str = "") -> str:
             return _apply_windows(spec, pid, match)
         if PLATFORM == "darwin":
             return _apply_darwin(spec, pid, match)
+        from launcher import wayland
+
+        # X11 apps running under XWayland are still reachable through wmctrl,
+        # but we cannot tell which those are before looking, and the compositor
+        # backend is the one that works for native Wayland clients.
+        if wayland.is_wayland():
+            return wayland.apply(spec, pid, match)
         return _apply_linux(spec, pid, match)
     except WindowError:
         raise
     except (OSError, subprocess.SubprocessError, ValueError) as exc:
         raise WindowError(str(exc)) from exc
+
+
+def backend_name() -> str:
+    """Which placement backend this session will use — surfaced by `palaunch where`."""
+    if PLATFORM == "windows":
+        return "win32 (user32 + IVirtualDesktopManager)"
+    if PLATFORM == "darwin":
+        return "AppleScript" + (" + yabai" if shutil.which("yabai") else " (no yabai: no Spaces)")
+    from launcher import wayland
+
+    if wayland.is_wayland():
+        which = wayland.compositor()
+        return f"wayland/{which}" if which else "wayland (unsupported compositor)"
+    return "x11 (wmctrl)" if shutil.which("wmctrl") else "x11 (wmctrl missing)"

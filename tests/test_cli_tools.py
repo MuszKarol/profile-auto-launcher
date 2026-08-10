@@ -86,6 +86,25 @@ def test_new_refuses_to_overwrite(profiles_dir, capsys):
     assert "already exists" in capsys.readouterr().err
 
 
+def test_a_closed_pipe_does_not_traceback(write_profile, monkeypatch, capsys):
+    # `palaunch list | head -2` closes stdout early; a CLI must exit quietly.
+    write_profile("p", "name: P\nsteps: []\n")
+
+    def explode(*_args, **_kwargs):
+        raise BrokenPipeError(32, "Broken pipe")
+
+    monkeypatch.setattr("builtins.print", explode)
+    assert main(["list"]) == 0
+
+
+def test_interrupt_reports_the_conventional_exit_code(monkeypatch):
+    monkeypatch.setattr(
+        "launcher.cli._cmd_status",
+        lambda _args: (_ for _ in ()).throw(KeyboardInterrupt()),
+    )
+    assert main(["status"]) == 130
+
+
 def test_status_with_nothing_running(capsys):
     assert main(["status"]) == 0
     assert "No profile is currently running" in capsys.readouterr().out
