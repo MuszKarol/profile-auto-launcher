@@ -7,12 +7,13 @@ the processes that appeared (and stayed) into `type: app` steps.
 Only long-lived processes count. Anything that exits during the session was a
 build script or a helper, not something worth relaunching.
 """
+
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 from launcher import sysprobe
 from launcher.config import PLATFORM
@@ -24,27 +25,69 @@ log = get_logger("record")
 # recording. Matched case-insensitively against the process name.
 _NOISE = {
     "windows": {
-        "conhost.exe", "cmd.exe", "powershell.exe", "pwsh.exe", "svchost.exe",
-        "runtimebroker.exe", "backgroundtaskhost.exe", "dllhost.exe",
-        "applicationframehost.exe", "sihost.exe", "taskhostw.exe", "python.exe",
-        "pythonw.exe", "wmiprvse.exe", "consent.exe", "searchprotocolhost.exe",
+        "conhost.exe",
+        "cmd.exe",
+        "powershell.exe",
+        "pwsh.exe",
+        "svchost.exe",
+        "runtimebroker.exe",
+        "backgroundtaskhost.exe",
+        "dllhost.exe",
+        "applicationframehost.exe",
+        "sihost.exe",
+        "taskhostw.exe",
+        "python.exe",
+        "pythonw.exe",
+        "wmiprvse.exe",
+        "consent.exe",
+        "searchprotocolhost.exe",
     },
     "linux": {
-        "sh", "bash", "zsh", "dash", "python3", "python", "gpg-agent", "dbus-daemon",
-        "xdg-desktop-portal", "gvfsd", "tracker-miner-fs", "at-spi2-registryd",
-        "ibus-daemon", "pipewire", "wireplumber", "sleep", "ps", "which",
+        "sh",
+        "bash",
+        "zsh",
+        "dash",
+        "python3",
+        "python",
+        "gpg-agent",
+        "dbus-daemon",
+        "xdg-desktop-portal",
+        "gvfsd",
+        "tracker-miner-fs",
+        "at-spi2-registryd",
+        "ibus-daemon",
+        "pipewire",
+        "wireplumber",
+        "sleep",
+        "ps",
+        "which",
     },
     "darwin": {
-        "sh", "bash", "zsh", "python3", "python", "mdworker_shared", "quicklookd",
-        "distnoted", "cfprefsd", "com.apple.WebKit.WebContent", "sleep",
+        "sh",
+        "bash",
+        "zsh",
+        "python3",
+        "python",
+        "mdworker_shared",
+        "quicklookd",
+        "distnoted",
+        "cfprefsd",
+        "com.apple.WebKit.WebContent",
+        "sleep",
     },
 }
 
 # Multi-process apps (browsers, Electron) spawn dozens of helpers. Recording
 # the main binary once is what the user meant.
 _HELPER_MARKERS = (
-    "--type=", "helper", "crashpad", "gpu-process", "utility", "renderer",
-    "zygote", "sandbox",
+    "--type=",
+    "helper",
+    "crashpad",
+    "gpu-process",
+    "utility",
+    "renderer",
+    "zygote",
+    "sandbox",
 )
 
 
@@ -117,7 +160,7 @@ def to_yaml(name: str, candidates: list[Candidate], description: str = "") -> st
     document = {
         "name": name,
         "description": description or f"Recorded session ({len(steps)} apps)",
-        "icon": "\U0001F4FC",
+        "icon": "\U0001f4fc",
         "steps": steps,
     }
     header = (

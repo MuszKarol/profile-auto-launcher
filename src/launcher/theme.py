@@ -4,6 +4,7 @@
 font family matters more than it looks: the previous hard-coded "Segoe UI"
 does not exist outside Windows, so Tk silently substituted a fallback.
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -67,8 +68,12 @@ LIGHT = Palette(
 def _probe(argv: list[str]) -> str:
     try:
         proc = subprocess.run(
-            argv, capture_output=True, text=True, timeout=3,
-            check=False, creationflags=_NO_WINDOW,
+            argv,
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+            creationflags=_NO_WINDOW,
         )
     except (OSError, subprocess.SubprocessError):
         return ""

@@ -4,10 +4,11 @@ The menu is rebuilt whenever the profiles directory changes or a profile
 starts/stops, so adding a YAML file no longer means restarting the tray.
 Graceful no-op if the dependencies aren't installed.
 """
+
 from __future__ import annotations
 
 import threading
-from typing import Callable, Iterable
+from collections.abc import Callable, Iterable
 
 from launcher.config import Profile, profile_files
 from launcher.logging_setup import get_logger
@@ -80,7 +81,7 @@ def run_tray(
     def label(profile: Profile) -> str:
         return f"{profile.icon} {profile.name}" if profile.icon else profile.name
 
-    def build_menu(current: list[Profile]) -> "pystray.Menu":
+    def build_menu(current: list[Profile]) -> pystray.Menu:
         from launcher import procs
 
         try:
@@ -97,7 +98,9 @@ def run_tray(
         ]
 
         items = [
-            pystray.MenuItem("Open Launcher…", lambda _i, _it: in_thread(on_open_hud), default=True),
+            pystray.MenuItem(
+                "Open Launcher…", lambda _i, _it: in_thread(on_open_hud), default=True
+            ),
             pystray.Menu.SEPARATOR,
             *run_items,
         ]

@@ -4,6 +4,7 @@ Editors with the YAML language server validate and autocomplete a file that
 carries a `$schema` modeline, which turns the profile format into something
 discoverable while typing instead of something to look up in the README.
 """
+
 from __future__ import annotations
 
 import json

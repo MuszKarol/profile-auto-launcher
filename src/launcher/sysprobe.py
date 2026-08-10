@@ -4,6 +4,7 @@
 out to a platform tool. Every probe returns a "don't know" value rather than
 raising, so a condition that cannot be evaluated fails closed at the caller.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -20,8 +21,12 @@ def _run(argv: list[str], timeout: float = 5.0) -> str | None:
         return None
     try:
         proc = subprocess.run(
-            argv, capture_output=True, text=True, timeout=timeout,
-            check=False, creationflags=_NO_WINDOW,
+            argv,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+            creationflags=_NO_WINDOW,
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -183,10 +188,15 @@ def on_battery() -> bool | None:
         return None
 
     if PLATFORM == "windows":
-        out = _run([
-            "powershell", "-NoProfile", "-NonInteractive", "-Command",
-            "(Get-CimInstance Win32_Battery).BatteryStatus",
-        ])
+        out = _run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "(Get-CimInstance Win32_Battery).BatteryStatus",
+            ]
+        )
         if out and out.strip():
             # BatteryStatus 2 == "AC connected"; 1 == discharging
             first = out.strip().splitlines()[0].strip()

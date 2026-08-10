@@ -1,4 +1,5 @@
 """Command-line entry point."""
+
 from __future__ import annotations
 
 import argparse
@@ -82,8 +83,10 @@ def _execute(
         return 0
     print(f"▶ running profile: {profile.name}")
     results = run_profile(
-        profile, on_result=lambda r: print(format_result(r)),
-        only=only or [], skip=skip or [],
+        profile,
+        on_result=lambda r: print(format_result(r)),
+        only=only or [],
+        skip=skip or [],
     )
     failed = sum(1 for r in results if r.counts_as_failure)
     ok = len(results) - failed
@@ -362,10 +365,7 @@ def _cmd_tray(args: argparse.Namespace) -> int:
         # hotkey toggles: a second press closes an already-open HUD
         toggle_pick_and_run(discover_profiles())
 
-    bindings = {
-        p.hotkey: (lambda prof: lambda: execute(prof))(p)
-        for p in profiles if p.hotkey
-    }
+    bindings = {p.hotkey: (lambda prof: lambda: execute(prof))(p) for p in profiles if p.hotkey}
     run_hotkey(open_hud, bindings)
 
     scheduler = None
@@ -381,7 +381,10 @@ def _cmd_tray(args: argparse.Namespace) -> int:
         threading.Thread(target=execute, args=(auto,), daemon=True).start()
 
     run_tray(
-        discover_profiles, execute, open_hud, on_stop=stop,
+        discover_profiles,
+        execute,
+        open_hud,
+        on_stop=stop,
         on_quit=(scheduler.stop if scheduler else None),
     )
     return 0
@@ -389,9 +392,9 @@ def _cmd_tray(args: argparse.Namespace) -> int:
 
 def _cmd_where(_args: argparse.Namespace) -> int:
     from launcher import hotkey, schema
+    from launcher.config import settings_path
     from launcher.logging_setup import log_path
     from launcher.state import history_path
-    from launcher.config import settings_path
 
     print(f"config dir:   {config_dir()}")
     print(f"profiles dir: {profiles_dir()}")
@@ -475,7 +478,11 @@ def _cmd_record(args: argparse.Namespace) -> int:
     from launcher import record
 
     name = args.name
-    path = Path(args.output) if args.output else profiles_dir() / f"{name.lower().replace(' ', '-')}.yaml"
+    path = (
+        Path(args.output)
+        if args.output
+        else profiles_dir() / f"{name.lower().replace(' ', '-')}.yaml"
+    )
     if path.exists() and not args.force:
         print(f"{path} already exists — pass --force to overwrite.", file=sys.stderr)
         return 1
@@ -508,13 +515,19 @@ def _cmd_config(args: argparse.Namespace) -> int:
     if args.config_cmd == "get":
         value = settings.get(args.key)
         if value is None:
-            print(f"Unknown setting '{args.key}'. Known: {', '.join(settings.known_keys())}", file=sys.stderr)
+            print(
+                f"Unknown setting '{args.key}'. Known: {', '.join(settings.known_keys())}",
+                file=sys.stderr,
+            )
             return 2
         print(value)
         return 0
     if args.config_cmd == "set":
         if args.key not in settings.known_keys():
-            print(f"Unknown setting '{args.key}'. Known: {', '.join(settings.known_keys())}", file=sys.stderr)
+            print(
+                f"Unknown setting '{args.key}'. Known: {', '.join(settings.known_keys())}",
+                file=sys.stderr,
+            )
             return 2
         current = getattr(settings.Settings(), args.key)
         raw: object = args.value
@@ -612,15 +625,22 @@ def build_parser() -> argparse.ArgumentParser:
     run_p = sub.add_parser("run", help="Run a profile by name (or the default)")
     run_p.add_argument("name", nargs="?", help="Profile name; uses default if omitted")
     run_p.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="Print what each step would do without executing anything",
     )
     run_p.add_argument(
-        "--only", action="append", default=[], metavar="STEP",
+        "--only",
+        action="append",
+        default=[],
+        metavar="STEP",
         help="Run only steps with this name/id/type (repeatable)",
     )
     run_p.add_argument(
-        "--skip", action="append", default=[], metavar="STEP",
+        "--skip",
+        action="append",
+        default=[],
+        metavar="STEP",
         help="Skip steps with this name/id/type (repeatable)",
     )
     run_p.set_defaults(func=_cmd_run)
@@ -709,7 +729,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     sync_p = sub.add_parser("sync", help="Sync the profiles directory through git")
     sync_p.add_argument(
-        "--init", nargs="?", const="", metavar="REMOTE",
+        "--init",
+        nargs="?",
+        const="",
+        metavar="REMOTE",
         help="Create the repo (optionally setting the remote URL)",
     )
     sync_p.add_argument("--status", action="store_true", help="Show repo status and exit")

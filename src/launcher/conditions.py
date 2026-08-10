@@ -5,30 +5,34 @@ the profile loads, so anything reaching this module is a key we understand.
 A probe that cannot answer (no Wi-Fi tooling, no battery) makes its condition
 false — a step guarded by a condition we cannot verify should not run.
 """
+
 from __future__ import annotations
 
 import os
 import subprocess
-from datetime import datetime, time as dtime
+from datetime import datetime
+from datetime import time as dtime
 from pathlib import Path
 from typing import Any
 
 from launcher.config import PLATFORM
 
-KNOWN_WHEN_KEYS = frozenset({
-    "platform",
-    "exists",
-    "not_exists",
-    "env",
-    "weekday",
-    "time_between",
-    "process_running",
-    "process_not_running",
-    "wifi_ssid",
-    "on_battery",
-    "hostname",
-    "command",
-})
+KNOWN_WHEN_KEYS = frozenset(
+    {
+        "platform",
+        "exists",
+        "not_exists",
+        "env",
+        "weekday",
+        "time_between",
+        "process_running",
+        "process_not_running",
+        "wifi_ssid",
+        "on_battery",
+        "hostname",
+        "command",
+    }
+)
 
 _WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -72,19 +76,27 @@ def _probe_command(spec: Any, env: dict[str, str], expand) -> bool:
         return False
     try:
         proc = subprocess.run(
-            argv, capture_output=True, timeout=10, check=False,
-            env=env, creationflags=_NO_WINDOW,
+            argv,
+            capture_output=True,
+            timeout=10,
+            check=False,
+            env=env,
+            creationflags=_NO_WINDOW,
         )
     except (OSError, subprocess.SubprocessError):
         return False
     return proc.returncode == 0
 
 
-def matches(when: dict[str, Any], env: dict[str, str], expand=None, now: datetime | None = None) -> bool:
+def matches(
+    when: dict[str, Any], env: dict[str, str], expand=None, now: datetime | None = None
+) -> bool:
     """Evaluate a `when` mapping. `expand` resolves `$VAR` inside path values."""
     if expand is None:
+
         def expand(value, _env):  # noqa: ANN001 - local shim
             return os.path.expanduser(str(value))
+
     moment = now or datetime.now()
 
     for key, expected in when.items():
@@ -136,7 +148,6 @@ def matches(when: dict[str, Any], env: dict[str, str], expand=None, now: datetim
             state = sysprobe.on_battery()
             if state is None or state is not bool(expected):
                 return False
-        elif key == "command":
-            if not _probe_command(expected, env, expand):
-                return False
+        elif key == "command" and not _probe_command(expected, env, expand):
+            return False
     return True

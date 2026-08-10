@@ -7,6 +7,7 @@ editor rewrites the file — which is why the save dialog says so out loud.
 Every step is validated through the real loader before anything is written, so
 the editor cannot produce a profile that `palaunch validate` would reject.
 """
+
 from __future__ import annotations
 
 import tkinter as tk
@@ -156,16 +157,28 @@ class _Editor:
         pal = self.pal
         top = tk.Frame(self.root, bg=pal.bg, padx=14, pady=10)
         top.pack(fill="x")
-        tk.Label(
-            top, text=self.path.name, bg=pal.bg, fg=pal.fg, font=(self.font, 13, "bold")
-        ).pack(side="left")
+        tk.Label(top, text=self.path.name, bg=pal.bg, fg=pal.fg, font=(self.font, 13, "bold")).pack(
+            side="left"
+        )
         tk.Button(
-            top, text="Save", command=self._save, bg=pal.accent, fg="#ffffff",
-            relief="flat", font=(self.font, 10, "bold"), padx=14,
+            top,
+            text="Save",
+            command=self._save,
+            bg=pal.accent,
+            fg="#ffffff",
+            relief="flat",
+            font=(self.font, 10, "bold"),
+            padx=14,
         ).pack(side="right")
         tk.Button(
-            top, text="Close", command=self.root.destroy, bg=pal.panel, fg=pal.fg,
-            relief="flat", font=(self.font, 10), padx=10,
+            top,
+            text="Close",
+            command=self.root.destroy,
+            bg=pal.panel,
+            fg=pal.fg,
+            relief="flat",
+            font=(self.font, 10),
+            padx=10,
         ).pack(side="right", padx=(0, 8))
 
         self.section_var = tk.StringVar(value="steps")
@@ -173,11 +186,20 @@ class _Editor:
         toggle.pack(side="right", padx=16)
         for label, value in (("Steps", "steps"), ("Teardown", "teardown")):
             tk.Radiobutton(
-                toggle, text=label, variable=self.section_var, value=value,
-                command=self._switch_section, bg=pal.bg, fg=pal.fg,
-                selectcolor=pal.panel, activebackground=pal.bg,
-                activeforeground=pal.fg, font=(self.font, 10), relief="flat",
-                highlightthickness=0, borderwidth=0,
+                toggle,
+                text=label,
+                variable=self.section_var,
+                value=value,
+                command=self._switch_section,
+                bg=pal.bg,
+                fg=pal.fg,
+                selectcolor=pal.panel,
+                activebackground=pal.bg,
+                activeforeground=pal.fg,
+                font=(self.font, 10),
+                relief="flat",
+                highlightthickness=0,
+                borderwidth=0,
             ).pack(side="left")
 
         columns = tk.Frame(self.root, bg=pal.bg, padx=14, pady=6)
@@ -188,9 +210,15 @@ class _Editor:
         left.pack_propagate(False)
 
         self.listbox = tk.Listbox(
-            left, bg=pal.panel, fg=pal.fg, selectbackground=pal.panel_selected,
-            selectforeground=pal.fg, relief="flat", font=(self.mono, 9),
-            highlightthickness=0, activestyle="none",
+            left,
+            bg=pal.panel,
+            fg=pal.fg,
+            selectbackground=pal.panel_selected,
+            selectforeground=pal.fg,
+            relief="flat",
+            font=(self.mono, 9),
+            highlightthickness=0,
+            activestyle="none",
         )
         self.listbox.pack(fill="both", expand=True)
         self.listbox.bind("<<ListboxSelect>>", self._on_select)
@@ -204,8 +232,14 @@ class _Editor:
             ("↓", lambda: self._move_step(1)),
         ):
             tk.Button(
-                buttons, text=label, command=command, bg=pal.panel, fg=pal.fg,
-                relief="flat", font=(self.font, 9), padx=8,
+                buttons,
+                text=label,
+                command=command,
+                bg=pal.panel,
+                fg=pal.fg,
+                relief="flat",
+                font=(self.font, 9),
+                padx=8,
             ).pack(side="left", padx=2)
 
         right = tk.Frame(columns, bg=pal.bg, padx=14)
@@ -222,15 +256,24 @@ class _Editor:
         self.hint = tk.Label(
             self.root,
             text="Saving rewrites the file — YAML comments are not preserved.",
-            bg=pal.bg, fg=pal.muted, font=(self.font, 9), anchor="w", padx=14, pady=6,
+            bg=pal.bg,
+            fg=pal.muted,
+            font=(self.font, 9),
+            anchor="w",
+            padx=14,
+            pady=6,
         )
         self.hint.pack(fill="x")
 
     def _build_profile_fields(self) -> None:
         pal = self.pal
         tk.Label(
-            self.profile_box, text="Profile", bg=pal.bg, fg=pal.muted,
-            font=(self.font, 9, "bold"), anchor="w",
+            self.profile_box,
+            text="Profile",
+            bg=pal.bg,
+            fg=pal.muted,
+            font=(self.font, 9, "bold"),
+            anchor="w",
         ).pack(fill="x")
         grid = tk.Frame(self.profile_box, bg=pal.bg)
         grid.pack(fill="x")
@@ -249,8 +292,14 @@ class _Editor:
         if kind == "bool":
             var = tk.BooleanVar(value=bool(value))
             widget = tk.Checkbutton(
-                parent, variable=var, bg=pal.bg, fg=pal.fg, selectcolor=pal.panel,
-                activebackground=pal.bg, highlightthickness=0, borderwidth=0,
+                parent,
+                variable=var,
+                bg=pal.bg,
+                fg=pal.fg,
+                selectcolor=pal.panel,
+                activebackground=pal.bg,
+                highlightthickness=0,
+                borderwidth=0,
             )
             widget.var = var  # type: ignore[attr-defined]
             return widget
@@ -259,26 +308,44 @@ class _Editor:
             var = tk.StringVar(value=str(value) if value else options[0])
             widget = tk.OptionMenu(parent, var, *options)
             widget.configure(
-                bg=pal.panel, fg=pal.fg, relief="flat", highlightthickness=0,
-                font=(self.font, 9), activebackground=pal.panel_hover,
+                bg=pal.panel,
+                fg=pal.fg,
+                relief="flat",
+                highlightthickness=0,
+                font=(self.font, 9),
+                activebackground=pal.panel_hover,
             )
             widget.var = var  # type: ignore[attr-defined]
             return widget
         if kind in ("text", "dict"):
             widget = tk.Text(
-                parent, height=5, bg=pal.field_bg, fg=pal.fg, relief="flat",
-                insertbackground=pal.accent, font=(self.mono, 9), highlightthickness=1,
+                parent,
+                height=5,
+                bg=pal.field_bg,
+                fg=pal.fg,
+                relief="flat",
+                insertbackground=pal.accent,
+                font=(self.mono, 9),
+                highlightthickness=1,
                 highlightbackground=pal.border,
             )
-            content = _format_pairs(value) if kind == "dict" else ("" if value is None else str(value))
+            content = (
+                _format_pairs(value) if kind == "dict" else ("" if value is None else str(value))
+            )
             widget.insert("1.0", content)
             return widget
         var = tk.StringVar(
             value=_format_list(value) if kind == "list" else ("" if value is None else str(value))
         )
         widget = tk.Entry(
-            parent, textvariable=var, bg=pal.field_bg, fg=pal.fg, relief="flat",
-            insertbackground=pal.accent, font=(self.mono, 9), highlightthickness=1,
+            parent,
+            textvariable=var,
+            bg=pal.field_bg,
+            fg=pal.fg,
+            relief="flat",
+            insertbackground=pal.accent,
+            font=(self.mono, 9),
+            highlightthickness=1,
             highlightbackground=pal.border,
         )
         widget.var = var  # type: ignore[attr-defined]
@@ -359,7 +426,8 @@ class _Editor:
             return
         self._commit_form()
         self.steps[self.selected], self.steps[target] = (
-            self.steps[target], self.steps[self.selected],
+            self.steps[target],
+            self.steps[self.selected],
         )
         self.selected = target
         self._refresh_list()
@@ -372,8 +440,11 @@ class _Editor:
         self.widgets.clear()
         if not self.steps:
             tk.Label(
-                self.form, text="No steps yet — press “+ Add”.", bg=pal.bg,
-                fg=pal.muted, font=(self.font, 10),
+                self.form,
+                text="No steps yet — press “+ Add”.",
+                bg=pal.bg,
+                fg=pal.muted,
+                font=(self.font, 10),
             ).pack(pady=20)
             return
 
@@ -390,8 +461,12 @@ class _Editor:
             head, self.type_var, *sorted(KNOWN_STEP_TYPES), command=self._change_type
         )
         type_menu.configure(
-            bg=pal.panel, fg=pal.fg, relief="flat", highlightthickness=0,
-            font=(self.font, 9), activebackground=pal.panel_hover,
+            bg=pal.panel,
+            fg=pal.fg,
+            relief="flat",
+            highlightthickness=0,
+            font=(self.font, 9),
+            activebackground=pal.panel_hover,
         )
         type_menu.pack(side="left")
 
@@ -404,8 +479,13 @@ class _Editor:
         grid.columnconfigure(1, weight=1)
         for row, (key, label, kind) in enumerate(rows):
             tk.Label(
-                grid, text=label, bg=pal.bg, fg=pal.fg, font=(self.font, 9),
-                anchor="nw", width=22,
+                grid,
+                text=label,
+                bg=pal.bg,
+                fg=pal.fg,
+                font=(self.font, 9),
+                anchor="nw",
+                width=22,
             ).grid(row=row, column=0, sticky="nw", pady=2)
             widget = self._make_widget(grid, kind, step.get(key))
             widget.grid(row=row, column=1, sticky="ew", pady=2)
@@ -418,9 +498,9 @@ class _Editor:
         # not leave a stale `url:` on a `kill:` step for the loader to reject.
         keep = {"type", "name", "id", *(k for k, _l, _t in _COMMON_TAIL)}
         keep.update(k for k, _l, _t in FIELDS.get(new_type, []))
-        self.steps[self.selected] = {
-            k: v for k, v in step.items() if k in keep
-        } | {"type": new_type}
+        self.steps[self.selected] = {k: v for k, v in step.items() if k in keep} | {
+            "type": new_type
+        }
         self._refresh_list()
 
     def _commit_form(self) -> None:

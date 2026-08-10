@@ -7,10 +7,11 @@ the HUD (settings `hotkey`, default `<alt>+<space>`) and any per-profile
 A malformed or duplicate combination is logged and skipped — one bad profile
 must not cost you every other shortcut.
 """
+
 from __future__ import annotations
 
 import threading
-from typing import Callable
+from collections.abc import Callable
 
 from launcher.logging_setup import get_logger
 
