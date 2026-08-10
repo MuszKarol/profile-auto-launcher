@@ -3,6 +3,13 @@ description: Mail, calendar, chat and the daily board — no IDE
 icon: "💼"
 tags: [meetings, email, chat]
 
+# Starts itself on weekday mornings while the tray is running. `at:` only fires
+# inside a 30-minute catch-up window, so booting at noon won't replay it.
+triggers:
+  - name: workday start
+    at: "09:00"
+    weekday: [mon, tue, wed, thu, fri]
+
 steps:
   - type: env
     name: work env
@@ -17,8 +24,8 @@ steps:
     optional: true
     path:
       windows: "%APPDATA%\\Zoom\\bin\\Zoom.exe"
-      linux:   /usr/bin/zoom
-      darwin:  /Applications/zoom.us.app/Contents/MacOS/zoom.us
+      linux: /usr/bin/zoom
+      darwin: /Applications/zoom.us.app/Contents/MacOS/zoom.us
 
   - type: url
     name: inbox
@@ -35,3 +42,20 @@ steps:
   - type: url
     name: task board
     url: https://trello.com
+
+  # Only nags about the standup when it is actually about to happen.
+  - type: notify
+    name: standup reminder
+    when:
+      time_between: ["09:00", "09:45"]
+      weekday: [mon, tue, wed, thu, fri]
+    title: Standup
+    message: "Standup at 09:45 — board is open"
+
+teardown:
+  - type: kill
+    name: close Zoom
+    process:
+      windows: Zoom.exe
+      linux: zoom
+      darwin: zoom.us

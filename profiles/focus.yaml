@@ -2,6 +2,7 @@ name: Focus
 description: Kill distractions, lo-fi in the background, notes open
 icon: "🎯"
 tags: [quiet, deep-work, notes]
+hotkey: "<ctrl>+<alt>+f"
 
 steps:
   - type: kill
@@ -21,13 +22,27 @@ steps:
       PAL_SESSION: focus
       DO_NOT_DISTURB: "1"
 
+  # Swap in a quieter editor config for the session; the teardown puts the
+  # original back. `symlink` replaces an existing link, so re-running is safe.
+  - type: file
+    name: quiet editor config
+    action: symlink
+    optional: true
+    when:
+      platform: [linux, darwin]
+      exists: "~/.config/palaunch-configs/focus-settings.json"
+    src: "~/.config/palaunch-configs/focus-settings.json"
+    dest: "~/.config/Code/User/settings.json"
+
   - type: app
     name: Obsidian notes
     optional: true
     path:
       windows: "%LOCALAPPDATA%\\Obsidian\\Obsidian.exe"
-      linux:   /usr/bin/obsidian
-      darwin:  /Applications/Obsidian.app/Contents/MacOS/Obsidian
+      linux: /usr/bin/obsidian
+      darwin: /Applications/Obsidian.app/Contents/MacOS/Obsidian
+    window:
+      position: right-half
 
   - type: url
     name: lo-fi radio
@@ -36,3 +51,17 @@ steps:
   - type: url
     name: writing doc
     url: https://notion.so
+
+  - type: notify
+    title: Focus
+    message: "Distractions closed — go."
+
+teardown:
+  - type: file
+    name: restore editor config
+    action: symlink
+    optional: true
+    when:
+      exists: "~/.config/palaunch-configs/default-settings.json"
+    src: "~/.config/palaunch-configs/default-settings.json"
+    dest: "~/.config/Code/User/settings.json"
