@@ -122,7 +122,8 @@ Your profiles live in `~/.config/profile-auto-launcher/profiles/` (Linux),
 | `launcher.interp`      | `{{ … }}` templating over vars, env, time, host, secrets |
 | `launcher.secrets`     | OS credential store (Keychain / Credential Manager / libsecret) |
 | `launcher.procs`       | Per-profile pid registry, liveness, graceful termination |
-| `launcher.windows`     | Window placement (user32 / wmctrl+xdotool / AppleScript)  |
+| `launcher.windows`     | Window placement: user32, wmctrl/xdotool, AppleScript, virtual desktops |
+| `launcher.wayland`     | Wayland placement per compositor (Sway / Hyprland / KWin) |
 | `launcher.scheduler`   | Time-based `triggers:` while the tray runs               |
 | `launcher.hud`         | Tk HUD picker with live step results — stdlib only       |
 | `launcher.editor`      | Graphical profile/step editor                            |
@@ -166,9 +167,35 @@ Other execution properties:
   (Windows), LaunchAgent (macOS).
 - **Global hotkeys:** `pynput.keyboard.GlobalHotKeys`.
 - **System tray:** `pystray.Icon`, menu rebuilt on profile/state change.
-- **Window placement:** `user32` via ctypes, `wmctrl`/`xdotool`, AppleScript.
 - **Secrets:** `keyring` → Keychain / Credential Manager / libsecret.
 - **Config directory:** `platformdirs.user_config_dir("profile-auto-launcher")`.
+- **Window placement:** one backend per session type. `palaunch where` prints
+  which one you are on.
+
+  | Session | Geometry | `workspace:` | Needs |
+  |---------|----------|--------------|-------|
+  | Windows | `user32` via ctypes | `IVirtualDesktopManager` | — |
+  | X11 | `wmctrl` + `xdotool` | `wmctrl` | `wmctrl` (`xdotool` to minimise) |
+  | Wayland — Sway | `swaymsg` IPC | `swaymsg` | — |
+  | Wayland — Hyprland | `hyprctl` | `hyprctl` | — |
+  | Wayland — KWin | KWin script over D-Bus | KWin script | `gdbus`, `kscreen-doctor` |
+  | Wayland — GNOME | *not possible* | *not possible* | see below |
+  | macOS | AppleScript / System Events | `yabai` | Accessibility permission |
+
+  Wayland gives no protocol for one client to move another's window, so each
+  compositor is driven through its own control channel. GNOME/Mutter has none
+  that works on release builds — `Shell.Eval` is disabled and placement needs
+  a signed extension — so that combination raises a clear error instead of
+  failing silently. Run the app under XWayland if you need placement there.
+
+  On Windows, `workspace:` uses the public `MoveWindowToDesktop`, but Windows
+  publishes no way to *enumerate* desktops; the ordered GUID list comes from
+  Explorer's registry key, which is undocumented and could change in a future
+  build. Moves that the owning process refuses are reported, not swallowed.
+
+  On macOS, Spaces have no public API at all — not even for Apple's own
+  shortcuts — so `workspace:` drives [yabai](https://github.com/koekeishiya/yabai)
+  when it is installed and says so plainly when it is not.
 
 ---
 
@@ -216,15 +243,27 @@ Other execution properties:
 - [x] Git sync of the profiles directory (`palaunch sync`)
 - [x] JSON Schema + `# yaml-language-server:` modeline for editor autocomplete
 - [x] "Run on boot" installers for systemd / XDG / Startup / LaunchAgent
-- [x] Window placement (`window:` on `app`/`command` steps)
+- [x] Window placement (`window:` on `app`/`command` steps) on Windows, X11,
+      Wayland (Sway / Hyprland / KWin) and macOS
+- [x] Virtual desktops / Spaces via `workspace:` on every platform that
+      exposes a way to do it
 - [x] Tests on Windows / Linux / macOS across Python 3.10–3.13
+- [x] Tagged releases: PyPI via Trusted Publishing, frozen binaries for four
+      targets, Sigstore provenance attestations — see [RELEASING.md](RELEASING.md)
 
-### Not done yet
+### Known limits
 
-- [ ] Wayland window placement (the X11 backend needs `wmctrl`)
-- [ ] Virtual-desktop placement on Windows and macOS (no public API)
-- [ ] Published PyPI package and signed binaries (a PyInstaller spec is in
-      `packaging/`, but releases are not automated)
+These are platform limits rather than missing work, and each one reports
+itself rather than failing quietly:
+
+- **GNOME on Wayland** cannot be driven by an outside program at all. Use
+  XWayland or a GNOME extension.
+- **Windows virtual desktops** are enumerated from an undocumented registry
+  key, because no public API lists them; a future Windows build could move it.
+- **macOS Spaces** need `yabai` installed. Apple ships no public API.
+- **Platform code signing** is off until certificates are configured — the
+  binaries carry Sigstore attestations, which prove origin but do not silence
+  Gatekeeper or SmartScreen. `RELEASING.md` covers wiring certificates in.
 
 ---
 
@@ -295,7 +334,7 @@ otherwise fan out to every derived profile.
     monitor: 1            # 1-based; primary first
     position: left-half   # left/right/top/bottom-half, top-left…, center,
                           # full, maximized, fullscreen — or x/y/width/height
-    workspace: 3          # X11 only
+    workspace: 3          # virtual desktop / space, 1-based
     match: "Visual Studio"  # title substring, when the pid owns several windows
     focus: true
     timeout: 10           # how long to wait for the window to appear
@@ -529,12 +568,32 @@ ruff check src tests
 Extras: `tray` (pystray + Pillow), `hotkey` (pynput), `secrets` (keyring),
 `probe` (psutil — faster process/Wi-Fi/battery probes), `full`, `dev`.
 
-### Frozen binary
+### From PyPI
+
+```bash
+pip install "profile-auto-launcher[full]"
+```
+
+### Frozen binary — no Python needed
+
+Every tagged release attaches self-contained binaries for Linux, Windows and
+both macOS architectures. Each archive holds `palaunch`, the console-free
+`palaunchw`, the sample profiles and the example plugin.
+
+```bash
+# verify a download came from this repository's CI
+sha256sum -c SHA256SUMS.txt --ignore-missing
+gh attestation verify palaunch-0.2.0-linux-x86_64.tar.gz --repo MuszKarol/profile-auto-launcher
+```
+
+Building one yourself:
 
 ```bash
 pip install pyinstaller ".[full]"
 pyinstaller packaging/palaunch.spec     # -> dist/palaunch, dist/palaunchw
 ```
+
+Cutting a release is documented in [RELEASING.md](RELEASING.md).
 
 ### Everyday commands
 
