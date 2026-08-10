@@ -2,18 +2,20 @@
 
 Cross-platform (Windows / Linux / macOS) workflow automation launcher that
 replaces the static OS "Startup" folder with **context profiles**. Pick a
-profile at boot — "Dev", "Work", "Gaming", "Focus" — and the launcher runs a
-declarative sequence of apps, URLs, shell commands, env mutations, process
-kills, and timed delays.
+profile — "Dev", "Work", "Gaming", "Focus" — and the launcher runs a
+declarative graph of apps, URLs, shell commands, scripts, HTTP calls, env
+mutations, process kills, file operations and health checks. When you're done,
+`palaunch stop` closes everything it opened.
 
 ```
-┌─ Profile Auto Launcher ─────────────────────────────────┐
-│  > de                                                    │
-│    Dev  ★      —   Spin up the full dev environment      │
-│    Work        —   Meetings, email, chat — no IDE        │
-│    Focus       —   Silence notifications …               │
-│  ↑↓ navigate · Enter run · Esc cancel                    │
-└──────────────────────────────────────────────────────────┘
+┌─ Profile Auto Launcher ──────────────────────────┬───────────────────────────┐
+│  > de                                            │ Dev                       │
+│    🛠 Dev  ★     Spin up the full dev environment │ code · ide · docker       │
+│    💼 Work       Mail, calendar, chat            │ → set [ENVIRONMENT] …     │
+│    🎯 Focus      Kill distractions               │ → kill process slack      │
+│                                                  │ → spawn: docker start     │
+│  ↑↓ navigate  ⏎ run  → preview  ctrl+k stop      │ ⇉ launch /usr/bin/code    │
+└──────────────────────────────────────────────────┴───────────────────────────┘
 ```
 
 ---
@@ -34,14 +36,22 @@ bash scripts/install-linux.sh
 powershell -ExecutionPolicy Bypass -File scripts\install-windows.ps1
 ```
 
-Both scripts install the package, copy the sample profiles, and register
-the launcher to start at login.
+Both scripts install the package, copy the sample profiles and the example
+plugin, generate the JSON Schema for editor autocomplete, and register the
+launcher to start at login.
 
-### Quick start: autostart + tray + hotkey
+Never written a profile before? Let the launcher write the first one:
+
+```bash
+palaunch record "My Setup" --duration 120   # open your apps; it watches
+palaunch run "My Setup" --dry-run           # check what it captured
+```
+
+### Autostart + tray + hotkeys
 
 The launcher's resident mode is `palaunch tray` — it puts an icon in the
-system tray (Windows), menu bar (macOS) or AppIndicator area (Linux) and
-listens for the global hotkey:
+system tray (Windows), menu bar (macOS) or AppIndicator area (Linux), listens
+for global hotkeys, and evaluates profile `triggers:`.
 
 | OS      | Autostart mechanism (created by the installer)                        |
 |---------|------------------------------------------------------------------------|
@@ -52,36 +62,25 @@ listens for the global hotkey:
 Once the tray is running:
 
 - **`Alt+Space`** toggles the HUD — press once to open, press again (or `Esc`)
-  to close. Override the binding with `PAL_HOTKEY`, e.g.
-  `PAL_HOTKEY='<ctrl>+<alt>+p'`.
-- **Tray menu** (right-click the icon): every profile by name, "Open
-  Launcher…", "Quit".
-- A profile marked `autostart: true` runs automatically when the tray starts —
-  i.e. right after you log in.
+  to close. Change it with `palaunch config set hotkey '<ctrl>+<alt>+p'`.
+- **Per-profile hotkeys:** any profile with `hotkey: "<ctrl>+<alt>+d"` runs
+  straight from the keyboard, skipping the picker.
+- **Tray menu:** every profile by name, a **Stop** submenu listing what is
+  currently running, "Reload profiles", "Quit". The menu rebuilds itself when
+  you add a YAML file — no restart needed.
+- **Triggers** fire on schedule (`at: "09:00"`, `every: 2h`) while the tray runs.
+- A profile marked `autostart: true` runs when the tray starts — i.e. right
+  after you log in.
 
 > Linux tray note: pystray needs an AppIndicator/GTK backend on some desktops —
 > e.g. `sudo apt install gir1.2-appindicator3-0.1` on GNOME (plus the
 > AppIndicator extension) or nothing extra on KDE/XFCE.
-
-```bash
-# 3. Try it immediately
-palaunch list             # see available profiles
-palaunch run Dev          # run a profile by name
-palaunch run Dev --dry-run  # print what each step WOULD do, execute nothing
-palaunch pick             # open the filter-as-you-type HUD
-palaunch tray             # sit in the tray + listen for Alt+Space
-palaunch new Gaming       # scaffold a new profile YAML
-palaunch edit Dev         # open a profile in your editor
-palaunch validate         # check every profile YAML for schema errors
-```
+> Window placement needs `wmctrl` (and `xdotool` for minimising) on X11.
 
 Your profiles live in `~/.config/profile-auto-launcher/profiles/` (Linux),
 `~/Library/Application Support/profile-auto-launcher/profiles/` (macOS) or
-`%APPDATA%\profile-auto-launcher\profiles\` (Windows). Edit the bundled
-`dev.yaml` / `work.yaml` / `focus.yaml` / `gaming.yaml` to match your
-workflow, then call `palaunch run <name>`. Desktop apps in the samples are
-marked `optional: true`, so a machine without e.g. Steam or Zoom just skips
-them instead of failing the profile.
+`%LOCALAPPDATA%\profile-auto-launcher\profiles\` (Windows). Run
+`palaunch where` to print every path the launcher uses.
 
 ---
 
@@ -90,356 +89,492 @@ them instead of failing the profile.
 ```
                       ┌────────────────────────────────────┐
   OS autostart ─────▶ │ launcher.cli  (palaunch tray)      │
-                      │  ─ starts tray icon + hotkey       │
+                      │  ─ tray icon + hotkeys + scheduler │
                       └───────────┬────────────────────────┘
-                                  │ user picks profile
-    Alt+Space / tray menu ───────▶│
+                                  │ user picks / trigger fires
+    Alt+Space / tray / cron ─────▶│
                                   ▼
                       ┌────────────────────────────────────┐
                       │ launcher.hud  (Tk HUD picker)      │
                       └───────────┬────────────────────────┘
                                   │ Profile
                                   ▼
- ~/.config/pal/profiles/*.yaml ─▶ launcher.config  ──▶  launcher.executor
-                                                        │
-                                                        │ asyncio
-                                                        ▼
-                         ┌──────────┬──────────┬──────────┬──────────┐
-                         │ apps     │ commands │ urls     │ env/kill │
-                         │ (detached│ (async   │ (webbr.) │ (pkill/  │
-                         │  spawn)  │  exec)   │          │ taskkill)│
-                         └──────────┴──────────┴──────────┴──────────┘
+ profiles/*.yaml ──▶ launcher.config ──▶ launcher.executor ──▶ launcher.procs
+        │                  │                    │                 (pid registry
+        │                  │ interp/conditions  │ asyncio DAG      for `stop`)
+        ▼                  ▼                    ▼
+   schema.json      {{ vars }} / when:   ┌──────┴───────┬─────────┬──────────┐
+   (editor          secrets, probes      │ app command  │ url env │ http     │
+    autocomplete)                        │ script kill  │ file    │ plugin   │
+                                         │ wait wait_for│ notify  │ profile  │
+                                         └──────────────┴─────────┴──────────┘
+                                                       │
+                              logs/palaunch.log ◀──────┴──────▶ history.jsonl
 ```
 
 ### Module map
 
 | Module                 | Responsibility                                           |
 |------------------------|----------------------------------------------------------|
-| `launcher.config`      | Discover / parse YAML profiles, per-platform overrides   |
-| `launcher.executor`    | Async step runner (sequential by default, parallel opt-in)|
-| `launcher.hud`         | Tk-based HUD picker — stdlib only, no extra deps         |
-| `launcher.tray`        | Optional system tray (pystray/Pillow)                    |
-| `launcher.hotkey`      | Optional global hotkey listener (pynput)                 |
-| `launcher.state`       | Run history (`state.json`) for `last` + HUD recency      |
-| `launcher.notify`      | Native desktop notifications (toast/osascript/notify-send)|
-| `launcher.cli`         | `palaunch list|run|last|pick|tray|new|edit|validate|where`|
+| `launcher.config`      | Discover / parse YAML profiles, per-platform overrides, schema validation |
+| `launcher.executor`    | Async DAG step runner, 13 step types, retries, teardown  |
+| `launcher.conditions`  | `when:` evaluation (platform, time, process, wifi, battery…) |
+| `launcher.interp`      | `{{ … }}` templating over vars, env, time, host, secrets |
+| `launcher.secrets`     | OS credential store (Keychain / Credential Manager / libsecret) |
+| `launcher.procs`       | Per-profile pid registry, liveness, graceful termination |
+| `launcher.windows`     | Window placement (user32 / wmctrl+xdotool / AppleScript)  |
+| `launcher.scheduler`   | Time-based `triggers:` while the tray runs               |
+| `launcher.hud`         | Tk HUD picker with live step results — stdlib only       |
+| `launcher.editor`      | Graphical profile/step editor                            |
+| `launcher.record`      | Watches what you launch, writes it out as a profile      |
+| `launcher.tray`        | System tray, self-refreshing menu (pystray/Pillow)       |
+| `launcher.hotkey`      | Global + per-profile hotkeys (pynput)                    |
+| `launcher.settings`    | `settings.yaml` with `PAL_*` env overrides               |
+| `launcher.state`       | Run history, per-step timings, flakiness stats           |
+| `launcher.logging_setup` | Rotating log — the only diagnostics `palaunchw` has    |
+| `launcher.sync`        | Git sync of the profiles directory                       |
+| `launcher.schema`      | JSON Schema generation for editor autocomplete           |
+| `launcher.sysprobe`    | Process / Wi-Fi / battery probes (psutil when available) |
+| `launcher.notify`      | Native desktop notifications                             |
+| `launcher.cli`         | The `palaunch` command surface                           |
 
 ### Execution model
 
-- Steps in a profile are ordered and **sequential by default**.
-- Consecutive steps marked `parallel: true` are batched and launched
-  **concurrently** via `asyncio.gather`. The batch is awaited before the next
-  non-parallel step or `wait`.
-- `wait` drains any in-flight batch, sleeps, and continues. This is what
-  implements *"wait 5s after launching Docker before starting the IDE"*.
+Steps form a **dependency graph**. Two kinds of edge exist:
+
+- **Implicit**, derived from layout — the classic rules. A normal step waits
+  for everything before it; consecutive `parallel: true` steps form a batch
+  that runs concurrently and is joined before the next normal step. `wait` is
+  therefore a barrier.
+- **Explicit**, via `depends_on: [step-id]`. This is the *only* case where a
+  failed dependency skips its dependents; implicit edges never cascade,
+  because one broken step must not silently cancel the rest of your desktop.
+
+Other execution properties:
+
+- `max_parallel` (default 8) bounds concurrency across the whole run.
+- `retries` + `retry_delay` retry with exponential backoff.
+- `on_failure:` runs compensation steps when a step fails.
 - Apps are launched **detached** (`CREATE_NEW_PROCESS_GROUP` on Windows,
   `start_new_session=True` on POSIX) so the launcher can exit without killing
-  your IDE.
+  your IDE — while their pids are recorded so `palaunch stop` still can.
+- A dependency cycle is reported as a failed step, not a hang.
 
 ### OS integration
 
-- **Autostart**
-  - Linux: systemd user unit, or a `.desktop` file in `~/.config/autostart/`
-  - Windows: Startup folder shortcut, or a `Run` registry entry
-- **Global hotkey:** `pynput.keyboard.GlobalHotKeys` — default `Alt+Space`.
-- **System tray:** `pystray.Icon` with a menu of profiles + "Open Launcher…".
-- **Config directory:** `platformdirs.user_config_dir("profile-auto-launcher")`
-  (`~/.config/profile-auto-launcher/` on Linux, `%APPDATA%\…` on Windows).
+- **Autostart:** systemd user unit or `.desktop` (Linux), Startup shortcut
+  (Windows), LaunchAgent (macOS).
+- **Global hotkeys:** `pynput.keyboard.GlobalHotKeys`.
+- **System tray:** `pystray.Icon`, menu rebuilt on profile/state change.
+- **Window placement:** `user32` via ctypes, `wmctrl`/`xdotool`, AppleScript.
+- **Secrets:** `keyring` → Keychain / Credential Manager / libsecret.
+- **Config directory:** `platformdirs.user_config_dir("profile-auto-launcher")`.
 
 ---
 
-## 2. MVP feature list (prioritised)
+## 2. Feature list
 
-### P0 — shipped in this repo
+### Shipped
+
+**Core**
 - [x] YAML profile schema with per-platform command/app/path overrides
-- [x] Async executor: apps, URLs, commands, env mutations, process kills, waits
-- [x] Sequential-by-default + `parallel: true` batches
-- [x] Detached app spawns (launcher can exit safely)
-- [x] HUD picker (Tk, stdlib) — keyboard-first, filter-as-you-type
-- [x] CLI: `list / run / pick / tray / where`
-- [x] Graceful degradation when tray/hotkey deps are missing
+- [x] Async DAG executor: implicit ordering, `parallel: true` batches,
+      explicit `depends_on`, `max_parallel`
+- [x] 13 step types — `app`, `command`, `script`, `url`, `env`, `kill`,
+      `wait`, `wait_for`, `profile`, `notify`, `http`, `plugin`, `file`
+- [x] Per-step `enabled` / `optional` / `timeout` / `retries` / `retry_delay`
+      / `on_failure`
+- [x] Conditional steps — `when: {platform, exists, not_exists, env, weekday,
+      time_between, process_running, process_not_running, wifi_ssid,
+      on_battery, hostname, command}`
+- [x] Health checks (`wait_for` — poll tcp/http endpoint or command)
+- [x] Profile inheritance (`extends:`) and composition (`type: profile`)
+- [x] `{{ … }}` interpolation over profile fields, `vars:`, env, time,
+      hostname, user and secrets
+- [x] Secret storage via the OS credential store, scrubbed from logs/history
+- [x] Plugin system (`type: plugin`, external executables, JSON contract)
 
-### P1 — shipped
-- [x] System tray with profile menu (pystray optional dep)
-- [x] Global hotkey `Alt+Space` opens HUD (pynput optional dep)
-- [x] "Run on boot" installer for systemd / Windows Startup
-- [x] Per-step success/failure view — the HUD streams live ✓/✗ results while
-      the profile runs, auto-closes on success, stays open on failure
-- [x] Retry/timeout per step (`retries`, `timeout`)
-- [x] `optional: true` steps (failure doesn't fail the profile), `enabled: false` toggles
-- [x] `palaunch run --dry-run`, `palaunch validate`, `palaunch new`, `palaunch edit`
-- [x] Conditional steps (`when: {platform, exists, env, weekday}`)
-- [x] Health checks (`wait_for` — poll tcp/http endpoint or command until ready)
-- [x] Run history: `palaunch last` re-runs the previous profile, HUD floats
-      the last-run profile to the top (`↺ recent`)
-- [x] Native desktop notification when a profile finishes (disable: `PAL_NOTIFY=0`)
-- [x] Profile inheritance (`extends: <file-stem>`)
-- [x] `autostart: true` — tray runs that profile once at login
-- [ ] Profile editor UI
+**Lifecycle**
+- [x] `teardown:` steps + pid tracking → `palaunch stop`
+- [x] `palaunch switch` — stop everything else, then run this profile
+- [x] `palaunch status` — what's running, and what it last did
 
-### P2 — later
-- [ ] Secret storage (macOS Keychain / Win Credential Manager / libsecret)
-- [ ] Plugin system (`type: plugin`, external executables)
-- [ ] Cloud sync of profiles across machines
+**Interface**
+- [x] HUD picker — fuzzy filter, live per-step results, step preview,
+      light/dark theme following the desktop, running-profile badge
+- [x] Graphical profile editor (`palaunch edit <name> --gui`)
+- [x] System tray with a self-refreshing menu and a Stop submenu
+- [x] Global hotkey + per-profile hotkeys
+- [x] Native desktop notifications
+- [x] `palaunch record` — writes your first profile by watching you work
+
+**Operations**
+- [x] Rotating file log + `palaunch logs [-f]`
+- [x] Run history with per-step timings + `palaunch history [--stats]`
+- [x] `settings.yaml` + `palaunch config get/set/list`
+- [x] Time-based `triggers:` evaluated by the tray
+- [x] Git sync of the profiles directory (`palaunch sync`)
+- [x] JSON Schema + `# yaml-language-server:` modeline for editor autocomplete
+- [x] "Run on boot" installers for systemd / XDG / Startup / LaunchAgent
+- [x] Window placement (`window:` on `app`/`command` steps)
+- [x] Tests on Windows / Linux / macOS across Python 3.10–3.13
+
+### Not done yet
+
+- [ ] Wayland window placement (the X11 backend needs `wmctrl`)
+- [ ] Virtual-desktop placement on Windows and macOS (no public API)
+- [ ] Published PyPI package and signed binaries (a PyInstaller spec is in
+      `packaging/`, but releases are not automated)
 
 ---
 
 ## 3. Configuration schema (YAML)
 
-```yaml
-name: string           # profile display name (required)
-description: string    # shown in the HUD
-icon: string           # emoji/glyph shown in the HUD and tray menu
-tags: [string]         # extra keywords the HUD fuzzy filter matches
-default: bool          # run this if no name is passed to `palaunch run`
-autostart: bool        # `palaunch tray` runs this profile once at startup/login
-extends: string        # inherit another profile file (by stem): its steps run
-                       # first, scalar fields are overridden by this file;
-                       # `default`/`autostart`/`name` are never inherited
-
-steps:                 # ordered list
-  - type: app | command | url | env | kill | wait | wait_for
-    name: string               # optional label for logs
-    parallel: bool             # batch with adjacent parallel steps
-    enabled: bool              # false = skip the step (kept in output as SKP)
-    optional: bool             # true = failure doesn't fail the profile
-    timeout: float             # seconds; blocking commands + wait_for budget
-    retries: int               # extra attempts after a failure
-    when:                      # skip unless ALL conditions hold (AND)
-      platform: windows | linux | darwin | [list]
-      exists: path | [paths]         # file/dir must exist
-      not_exists: path | [paths]
-      env: { KEY: value }            # env var equals
-      weekday: mon…sun | [list]
-    # type=app / command —----------------------------------------
-    path: string | {windows,linux,darwin}   # app only
-    run:  list | string | {windows,linux,darwin}   # command only
-    args: [string] | {windows,linux,darwin}   # app only
-    cwd:  string
-    detach: bool                # true = launch-and-forget (default)
-    # type=url —--------------------------------------------------
-    url: string
-    # type=wait —-------------------------------------------------
-    seconds: float
-    # type=wait_for —---------------------------------------------
-    url: tcp://host:port | http(s)://…   # poll endpoint until it answers
-    run: [argv]                          # …or poll a command until exit 0
-    interval: float                      # poll every N seconds (default 1)
-    # type=env —--------------------------------------------------
-    set:   { KEY: value }
-    unset: [KEY]
-    # type=kill —-------------------------------------------------
-    process: string | {windows,linux,darwin}
-```
-
-A fully annotated **Dev Mode** profile lives in [`profiles/dev.yaml`](profiles/dev.yaml):
+Editors pick up completion and validation from the generated schema — the
+modeline is written into every profile `palaunch new` scaffolds:
 
 ```yaml
-name: Dev
-description: Spin up the full dev environment (Docker, IDE, repos, dashboards)
-default: true
-steps:
-  - type: env
-    set: { ENVIRONMENT: development, PAL_SESSION: dev }
-    unset: [HTTP_PROXY]
-
-  - type: kill
-    name: close Slack
-    process: { windows: slack.exe, linux: slack, darwin: Slack }
-
-  - type: command
-    name: start docker
-    run:
-      windows: ["powershell", "-NoProfile", "-Command", "Start-Process 'Docker Desktop'"]
-      linux:  ["systemctl", "--user", "start", "docker-desktop"]
-      darwin: ["open", "-a", "Docker"]
-
-  - type: wait
-    seconds: 5
-
-  - type: app
-    name: VS Code
-    parallel: true
-    path:
-      windows: "%LOCALAPPDATA%\\Programs\\Microsoft VS Code\\Code.exe"
-      linux:   /usr/bin/code
-    args: ["~/projects/main"]
-
-  - type: app
-    name: Terminal
-    parallel: true
-    path: { windows: wt.exe, linux: /usr/bin/gnome-terminal }
-
-  - type: url
-    url: https://github.com/pulls/review-requested
-
-  - type: command
-    name: pull latest main
-    detach: false
-    cwd: "~/projects/main"
-    run: ["git", "pull", "--ff-only", "origin", "main"]
+# yaml-language-server: $schema=file:///home/you/.config/profile-auto-launcher/profile.schema.json
 ```
+
+### Profile level
+
+```yaml
+name: string            # display name (required; defaults to the file stem)
+description: string
+icon: "🛠"              # shown in the HUD and tray
+default: bool           # ★ in `palaunch list`; used when `run` gets no name
+autostart: bool         # the tray runs this once at login
+hotkey: "<ctrl>+<alt>+d"  # per-profile global shortcut
+tags: [code, docker]    # searchable in the HUD
+extends: base           # merge another profile file (by file stem)
+vars:                   # available as {{ vars.NAME }} everywhere below
+  repo: "~/projects/main"
+triggers:               # fire the profile on a schedule (tray only)
+  - at: "09:00"
+    weekday: [mon, tue, wed, thu, fri]
+  - every: 2h
+    when: {on_battery: false}
+steps: [...]            # what the profile does
+teardown: [...]         # what `palaunch stop` does before closing processes
+```
+
+`extends` merges parent steps first, child scalars win. `default`,
+`autostart`, `hotkey` and `name` are never inherited — one parent flag would
+otherwise fan out to every derived profile.
+
+### Common step keys
+
+```yaml
+- type: app | command | script | url | env | kill | wait | wait_for
+      | profile | notify | http | plugin | file
+  name: "human label"     # shown in the HUD and logs
+  id: docker              # referenced by depends_on
+  enabled: true           # false → reported as SKIP, never run
+  optional: false         # true → a failure doesn't fail the profile
+  parallel: false         # batch with adjacent parallel steps
+  depends_on: [docker]    # explicit edges; a failed dependency skips this step
+  timeout: 30             # seconds
+  retries: 2              # extra attempts after a failure
+  retry_delay: 2          # seconds before the first retry, doubling after
+  when: {...}             # skip unless every condition holds
+  on_failure: [...]       # compensation steps
+```
+
+### Step types
+
+```yaml
+# Launch an application, detached, optionally placed on screen
+- type: app
+  path: {windows: "%LOCALAPPDATA%\\...\\Code.exe", linux: /usr/bin/code}
+  args: ["{{ vars.repo }}"]
+  cwd: "~/projects"
+  detach: true            # false → wait for it to exit
+  track: true             # false → `palaunch stop` leaves it running
+  window:
+    monitor: 1            # 1-based; primary first
+    position: left-half   # left/right/top/bottom-half, top-left…, center,
+                          # full, maximized, fullscreen — or x/y/width/height
+    workspace: 3          # X11 only
+    match: "Visual Studio"  # title substring, when the pid owns several windows
+    focus: true
+    timeout: 10           # how long to wait for the window to appear
+
+# Run a command
+- type: command
+  run: ["git", "pull", "--ff-only"]   # or a string, split like a shell would
+  detach: false                       # false → wait and capture the exit code
+
+# Inline shell, without escaping it into an argv list
+- type: script
+  shell: auto             # auto | bash | sh | zsh | powershell | cmd
+  script: |
+    git fetch --all --prune
+    git pull --ff-only || echo "diverged"
+
+# Open a URL (http/https/mailto/ftp only — file:// and javascript: are refused)
+- type: url
+  url: https://github.com/pulls
+
+# Mutate the environment for every later step in this run
+- type: env
+  set: {ENVIRONMENT: development}
+  unset: [HTTP_PROXY]
+
+# Close an app by exact process name
+- type: kill
+  process: {windows: slack.exe, linux: slack, darwin: Slack}
+
+# Fixed delay — also a barrier that joins any in-flight parallel batch
+- type: wait
+  seconds: 5
+
+# Poll until something is actually ready
+- type: wait_for
+  url: tcp://localhost:5432   # or http(s)://…
+  run: ["docker", "info"]     # …or a command whose exit code decides
+  timeout: 60
+  interval: 2
+
+# Run another profile as a step
+- type: profile
+  profile: Focus
+
+# Desktop notification
+- type: notify
+  title: Dev
+  message: "Environment up at {{ time }}"
+
+# HTTP request (webhooks, home automation, status APIs)
+- type: http
+  method: POST
+  url: http://homeassistant.local:8123/api/services/scene/turn_on
+  headers: {Authorization: "Bearer {{ secret.ha_token }}"}
+  body: {entity_id: scene.evening}
+  expect_status: [200, 201]
+
+# External executable with a JSON contract — see plugins/hello_plugin.py
+- type: plugin
+  plugin: "~/.config/profile-auto-launcher/plugins/hello_plugin.py"
+  config: {message: "wrapped up at {{ time }}"}
+
+# File operations — config swapping between contexts
+- type: file
+  action: copy | symlink | mkdir | remove | write | append
+  src: "~/.config/palaunch-configs/focus-settings.json"
+  dest: "~/.config/Code/User/settings.json"
+  content: "written by {{ profile }}"     # write/append only
+```
+
+### Conditions (`when:`)
+
+Every key must hold (AND). A probe that cannot answer — no Wi-Fi tooling, no
+battery — makes its condition false: a step guarded by something unverifiable
+should not run.
+
+```yaml
+when:
+  platform: [linux, darwin]
+  exists: "~/projects/main/.git"
+  not_exists: "/tmp/maintenance.lock"
+  env: {ENVIRONMENT: development}
+  weekday: [mon, tue, wed, thu, fri]
+  time_between: ["09:00", "17:00"]     # wraps past midnight: ["22:00", "06:00"]
+  process_running: code
+  process_not_running: steam
+  wifi_ssid: [HomeNet, OfficeNet]
+  on_battery: false
+  hostname: [workstation]
+  command: ["docker", "info"]          # exit code 0 means true
+```
+
+### Interpolation (`{{ … }}`)
+
+```
+{{ profile }} {{ profile.icon }}   profile fields
+{{ vars.repo }}                    profile-level vars
+{{ env.HOME }}                     run-local env (sees earlier `env:` steps)
+{{ now }} {{ now:%H-%M }}          timestamps, optional strftime format
+{{ date }} {{ time }}
+{{ hostname }} {{ user }} {{ home }} {{ platform }}
+{{ secret.NAME }}                  OS credential store
+```
+
+Unknown placeholders are left verbatim rather than replaced by an empty
+string — silently dropping a token from a command line is how you end up
+running the wrong argument list. Secret values are replaced by `***` in every
+log line, HUD row and history record.
+
+```bash
+palaunch secret set ha_token          # prompts without echo
+```
+
+### Settings (`settings.yaml`)
+
+```bash
+palaunch config list
+palaunch config set theme dark        # auto | dark | light
+palaunch config set max_parallel 4
+palaunch config path
+```
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `hotkey` | `<alt>+<space>` | HUD shortcut |
+| `theme` | `auto` | HUD/editor palette; `auto` follows the desktop |
+| `notifications` | `true` | desktop toasts |
+| `log_level` / `log_max_bytes` / `log_backups` | `INFO` / 1 MB / 3 | rotating log |
+| `history_limit` | `500` | runs kept in `history.jsonl` |
+| `max_parallel` | `8` | concurrent steps (0 = unlimited) |
+| `editor` | *(unset)* | overrides `$EDITOR` for `palaunch edit` |
+| `scheduler` | `true` | honour `triggers:` while the tray runs |
+| `window_management` | `true` | apply `window:` blocks |
+| `hud_width` / `hud_height` | 620 / 420 | HUD size |
+| `sync_remote` | *(unset)* | git remote for `palaunch sync` |
+
+Any `PAL_*` environment variable of the same name wins over the file, so
+`PAL_THEME=light palaunch pick` still works for one-off overrides.
 
 ---
 
-## 4. Async launch code snippet
+## 4. Async launch code
 
-Heart of `launcher/executor.py` — sequential by default, adjacent
-`parallel: true` steps batched, `wait` blocks the queue:
+The scheduler is the interesting part: one loop drives both the implicit
+ordering and explicit `depends_on` edges.
 
 ```python
-async def run_profile_async(profile: Profile, on_result=None) -> list[StepResult]:
-    env = os.environ.copy()
-    results: list[StepResult] = []
-    batch: list[asyncio.Task[StepResult]] = []
+async def _execute_steps(steps, run, on_result=None):
+    deps = _build_dependencies(steps)      # implicit edges + depends_on
+    done = [False] * len(steps)
+    pending: dict[asyncio.Task, int] = {}
+    gate = _semaphore()                    # max_parallel
 
-    async def drain() -> None:
-        if not batch:
-            return
-        for res in await asyncio.gather(*batch):
-            results.append(res)
+    while not all(done):
+        for i, step in enumerate(steps):           # everything now runnable
+            if not done[i] and i not in pending.values():
+                if all(done[d] for d in deps[i]):
+                    pending[asyncio.create_task(run_indexed(i))] = i
+
+        if not pending:                            # nothing can ever run
+            mark_remaining_as_cycle_failures()
+            break
+
+        finished, _ = await asyncio.wait(set(pending), return_when=FIRST_COMPLETED)
+        for task in finished:
+            index = pending.pop(task)
+            done[index] = True
             if on_result:
-                on_result(res)
-        batch.clear()
-
-    for step in profile.steps:
-        if step.type == "wait":
-            await drain()
-            await asyncio.sleep(step.seconds)
-            continue
-        if step.parallel:
-            batch.append(asyncio.create_task(_run_step(step, env)))
-            continue
-        await drain()
-        results.append(await _run_step(step, env))
-    await drain()
-    return results
+                on_result(task.result())           # streams into the HUD live
 ```
 
-Detached spawn (so your IDE survives the launcher exiting):
+`_build_dependencies` is what preserves the original semantics:
 
 ```python
-def _spawn(argv, *, env, cwd, detach):
-    kwargs = {"env": env, "cwd": cwd, "close_fds": True}
-    if detach:
-        if PLATFORM == "windows":
-            DETACHED_PROCESS = 0x00000008
-            CREATE_NEW_PROCESS_GROUP = 0x00000200
-            kwargs["creationflags"] = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-        else:
-            kwargs["start_new_session"] = True
-        kwargs.update(stdin=subprocess.DEVNULL,
-                     stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL)
-    subprocess.Popen(argv, **kwargs)
+batch_start = 0
+for i, step in enumerate(steps):
+    if step.depends_on:                 # explicit wins
+        deps.append([index_of[d] for d in step.depends_on])
+    elif step.parallel:                 # concurrent with its batch
+        deps.append(list(range(batch_start)))
+    else:                               # barrier: waits for everything before
+        deps.append(list(range(i)))
+    if not step.parallel:
+        batch_start = i + 1
 ```
 
 ---
 
 ## 5. Tech stack rationale
 
-| Option                         | Pros                                                  | Cons                                            |
-|--------------------------------|-------------------------------------------------------|-------------------------------------------------|
-| **Python 3.10+ (chosen)**      | Stdlib tk for HUD, tiny surface, fast iteration       | Ships Python runtime                             |
-| Tauri (Rust + web frontend)    | 5–10 MB binary, native perf, great for production UI  | Slower to iterate, Rust ramp-up                  |
-| Electron (Node + web frontend) | Ubiquitous tooling, Raycast-style UIs easy            | 100 MB+ footprint, heavy RAM                     |
-
-Python was chosen for the MVP because the *logic* — YAML loading, async
-process orchestration, cross-platform spawning — is trivial in the stdlib, and
-the HUD only needs a few hundred lines of Tk. Once the schema and execution
-semantics stabilise, re-implementing the runtime in **Tauri** (Rust core +
-Svelte/React HUD) is a straightforward port: keep the YAML schema, re-write
-`executor.py` in `tokio`, and render a Raycast-style command palette in the
-webview.
+| Choice | Why |
+|--------|-----|
+| **Python 3.10+** | Ships on macOS/Linux, trivial on Windows; `asyncio` and `subprocess` cover every launch mode we need. |
+| **YAML profiles** | Editable by hand, diffable in git, and a JSON Schema gives autocomplete without writing an editor plugin. |
+| **Tkinter for the HUD** | Standard library. A launcher you install to save time should not pull a GUI toolkit first. |
+| **asyncio, not threads** | Steps are almost entirely I/O — spawning, polling ports, waiting on HTTP. One event loop keeps ordering explicit and cancellation sane. |
+| **Optional extras** | pystray, pynput, keyring and psutil are all optional; every integration degrades to a logged message instead of an ImportError. |
+| **platformdirs** | The config path differs on all three platforms and guessing it wrong is how profiles end up undiscovered. |
+| **No daemon** | The CLI is one-shot; the tray is the only long-lived process, and even it holds no state the files don't. |
 
 ---
 
 ## 6. Install & run
 
-Both installers install the package with the full extras (tray + global
-hotkey), copy the bundled sample profiles into the user config dir, and
-register the launcher to start automatically when you log in.
-
-Prerequisite on either OS: **Python 3.10 or newer** on your PATH.
-
 ### Linux
 
 ```bash
-git clone https://github.com/MuszKarol/profile-auto-launcher.git
-cd profile-auto-launcher
-bash scripts/install-linux.sh             # default: XDG .desktop autostart
-# or
-bash scripts/install-linux.sh --systemd   # systemd user unit instead
-bash scripts/install-linux.sh --no-autostart   # skip autostart registration
+bash scripts/install-linux.sh              # install + XDG autostart
+bash scripts/install-linux.sh --systemd    # …or a systemd user unit
+bash scripts/install-linux.sh --no-autostart
+bash scripts/uninstall-linux.sh
 ```
-
-What the script does:
-1. Runs `pip install --user --upgrade .[full]` (core + `pystray` + `pynput`).
-2. Copies `profiles/*.yaml` to `~/.config/profile-auto-launcher/profiles/`
-   (only files that don't already exist).
-3. Writes `~/.config/autostart/profile-auto-launcher.desktop` with
-   `Exec=<path-to>/palaunch tray` — the XDG standard honoured by GNOME, KDE,
-   XFCE, Cinnamon, etc. With `--systemd` it writes a user unit to
-   `~/.config/systemd/user/profile-auto-launcher.service` and runs
-   `systemctl --user enable --now` instead.
-
-Uninstall: `bash scripts/uninstall-linux.sh` (keeps your profiles).
-
-> **PATH note:** if you installed Python via your distro's package manager,
-> `pip install --user` puts `palaunch` in `~/.local/bin`. Make sure that
-> directory is on your `PATH` — most modern distros add it automatically.
 
 ### Windows
 
-Open **PowerShell** (no admin needed) in the repo root:
-
 ```powershell
-git clone https://github.com/MuszKarol/profile-auto-launcher.git
-cd profile-auto-launcher
 powershell -ExecutionPolicy Bypass -File scripts\install-windows.ps1
-# or skip the autostart shortcut:
 powershell -ExecutionPolicy Bypass -File scripts\install-windows.ps1 -NoAutostart
+powershell -ExecutionPolicy Bypass -File scripts\uninstall-windows.ps1
 ```
 
-What the script does:
-1. Runs `python -m pip install --user --upgrade .[full]`.
-2. Copies `profiles\*.yaml` to `%APPDATA%\profile-auto-launcher\profiles\`.
-3. Creates **Profile Auto Launcher.lnk** in the user Startup folder
-   (`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup`) pointing at
-   `palaunchw.exe tray` — the windowed (no-console) binary — so it comes up
-   in the tray at sign-in with no console window. To start it by hand without
-   a console, use `palaunchw tray` too; `palaunch` keeps the console for CLI use.
+### Manual / development
 
-Uninstall: `powershell -ExecutionPolicy Bypass -File scripts\uninstall-windows.ps1`.
+```bash
+pip install -e ".[full,dev]"     # everything, including test tooling
+pip install -e .                 # core only: CLI + HUD, no tray/hotkey
+pytest                           # 200+ tests
+ruff check src tests
+```
 
-> **PATH note:** if `palaunch` isn't on PATH after install, add the output of
-> `python -c "import site; print(site.USER_BASE)"` + `\Scripts` to your user
-> PATH. The installer prints the exact path if it has to fall back to it.
+Extras: `tray` (pystray + Pillow), `hotkey` (pynput), `secrets` (keyring),
+`probe` (psutil — faster process/Wi-Fi/battery probes), `full`, `dev`.
+
+### Frozen binary
+
+```bash
+pip install pyinstaller ".[full]"
+pyinstaller packaging/palaunch.spec     # -> dist/palaunch, dist/palaunchw
+```
 
 ### Everyday commands
 
 ```bash
-palaunch list             # see discovered profiles (icon, step count, description)
-palaunch run Dev          # run the "Dev" profile
-palaunch run Dev --dry-run  # describe every step without executing
-palaunch last             # re-run whatever you ran last time
-palaunch pick             # open the HUD picker (fuzzy filter + live run progress)
-palaunch tray             # run in system tray + listen for global hotkey
-palaunch new Gaming       # scaffold ~/.config/…/profiles/gaming.yaml (--edit to open it)
-palaunch edit Dev         # open a profile YAML in $EDITOR / OS default
-palaunch validate         # lint all profile YAMLs, non-zero exit on errors
-palaunch where            # print config paths
+# running
+palaunch list [--triggers]   # discovered profiles, hotkeys, schedules
+palaunch run Dev             # run a profile by name (or the default)
+palaunch run Dev --dry-run   # describe every step, execute nothing
+palaunch run Dev --only "VS Code" --skip docker    # partial runs, for debugging
+palaunch last                # re-run whatever you ran last time
+palaunch pick                # HUD picker with fuzzy filter and live progress
+palaunch tray                # tray + hotkeys + trigger scheduler
+
+# lifecycle
+palaunch status              # what's running and what it last did
+palaunch stop Dev            # teardown steps, then close tracked processes
+palaunch stop --all
+palaunch switch Gaming       # stop everything else, then run Gaming
+
+# authoring
+palaunch record "My Setup"   # watch what you open, write it out as a profile
+palaunch new Gaming [--edit|--gui]
+palaunch edit Dev [--gui]    # $EDITOR, or the graphical step editor
+palaunch validate [--schema] # lint every profile, non-zero exit on errors
+palaunch schema              # (re)write profile.schema.json
+
+# operations
+palaunch logs -n 100 -f      # rotating launcher log
+palaunch history [--stats]   # past runs; --stats ranks slow and flaky steps
+palaunch config set theme dark
+palaunch secret set ha_token
+palaunch sync --init git@github.com:you/palaunch-profiles.git
+palaunch sync -m "add evening profile"
+palaunch where               # every path and hotkey the launcher uses
 ```
 
-The launcher looks for profiles in `~/.config/profile-auto-launcher/profiles/`
-(or `%APPDATA%\profile-auto-launcher\profiles\` on Windows). For development
-inside the repo, set `PAL_INCLUDE_CWD=1` to additionally pick up `./profiles/`.
-This is opt-in by design — running `palaunch` in an unfamiliar directory that
-happens to contain `profiles/*.yaml` would otherwise execute whatever those
-files declare.
-
-Global hotkey defaults to `Alt+Space`; override with the `PAL_HOTKEY` env var
-(e.g. `PAL_HOTKEY='<super>+<shift>+p'`).
+For development inside the repo, set `PAL_INCLUDE_CWD=1` to additionally pick
+up `./profiles/`. This is opt-in by design — running `palaunch` in an
+unfamiliar directory that happens to contain `profiles/*.yaml` would otherwise
+execute whatever commands those files declare.
 
 ---
 

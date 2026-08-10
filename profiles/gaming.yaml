@@ -16,14 +16,18 @@ steps:
     set:
       PAL_SESSION: gaming
 
+  # Skipped on battery: launching a game client on an unplugged laptop is
+  # almost never what you meant.
   - type: app
     name: Steam
     parallel: true
     optional: true
+    when:
+      on_battery: false
     path:
       windows: "C:\\Program Files (x86)\\Steam\\steam.exe"
-      linux:   /usr/bin/steam
-      darwin:  /Applications/Steam.app/Contents/MacOS/steam_osx
+      linux: /usr/bin/steam
+      darwin: /Applications/Steam.app/Contents/MacOS/steam_osx
 
   - type: app
     name: Discord
@@ -31,11 +35,23 @@ steps:
     optional: true
     path:
       windows: "%LOCALAPPDATA%\\Discord\\Update.exe"
-      linux:   /usr/bin/discord
-      darwin:  /Applications/Discord.app/Contents/MacOS/Discord
+      linux: /usr/bin/discord
+      darwin: /Applications/Discord.app/Contents/MacOS/Discord
     args:
       windows: ["--processStart", "Discord.exe"]
+    window:
+      monitor: 2
+      position: full
 
   - type: url
     name: Twitch
     url: https://www.twitch.tv/directory/following
+
+teardown:
+  - type: kill
+    name: close Steam
+    process: { windows: steam.exe, linux: steam, darwin: steam_osx }
+
+  - type: kill
+    name: close Discord
+    process: { windows: Discord.exe, linux: Discord, darwin: Discord }

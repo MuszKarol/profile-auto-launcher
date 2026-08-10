@@ -1,10 +1,15 @@
 # "Dev Mode" — full development environment
-# Fields marked as {windows, linux, darwin} are picked per-platform at runtime.
+# Fields written as {windows, linux, darwin} are picked per-platform at runtime.
 name: Dev
 description: Spin up the full dev environment (Docker, IDE, repos, dashboards)
 icon: "🛠"
 tags: [code, ide, docker]
 default: true
+hotkey: "<ctrl>+<alt>+d"
+
+# {{ vars.NAME }} works in any string below — one place to change the repo path
+vars:
+  repo: "~/projects/main"
 
 steps:
   # ── 1. Set environment for anything we launch below
@@ -13,6 +18,7 @@ steps:
     set:
       ENVIRONMENT: development
       PAL_SESSION: dev
+      REPO_ROOT: "{{ vars.repo }}"
     unset:
       - HTTP_PROXY
 
@@ -26,39 +32,60 @@ steps:
 
   # ── 3. Start Docker (long-running, detached) then wait for it to be ready
   - type: command
+    id: docker
     name: start docker
     detach: true
     run:
       windows: ["powershell", "-NoProfile", "-Command", "Start-Process 'Docker Desktop'"]
-      linux:  ["systemctl", "--user", "start", "docker-desktop"]
+      linux: ["systemctl", "--user", "start", "docker-desktop"]
       darwin: ["open", "-a", "Docker"]
 
   # Poll `docker info` until the daemon actually answers (better than a blind sleep)
   - type: wait_for
+    id: docker-ready
     name: docker ready
     run: ["docker", "info"]
     timeout: 60
     interval: 2
-    optional: true   # don't fail the profile on machines without docker
+    optional: true # don't fail the profile on machines without docker
 
-  # ── 4. Launch IDE + terminal in parallel (consecutive `parallel: true` steps batch)
+  # Only starts once docker-ready succeeded; if it didn't, this is skipped
+  # rather than failing against a daemon that isn't there.
+  - type: command
+    name: bring up services
+    depends_on: [docker-ready]
+    detach: false
+    timeout: 120
+    retries: 1
+    retry_delay: 3
+    cwd: "{{ vars.repo }}"
+    run: ["docker", "compose", "up", "-d"]
+    optional: true
+
+  # ── 4. Launch IDE + terminal in parallel, each placed on its own half
   - type: app
     name: VS Code
     parallel: true
     path:
       windows: "%LOCALAPPDATA%\\Programs\\Microsoft VS Code\\Code.exe"
-      linux:   /usr/bin/code
-      darwin:  /Applications/Visual Studio Code.app/Contents/MacOS/Electron
+      linux: /usr/bin/code
+      darwin: /Applications/Visual Studio Code.app/Contents/MacOS/Electron
     args:
-      - "~/projects/main"
+      - "{{ vars.repo }}"
+    window:
+      monitor: 1
+      position: left-half
 
   - type: app
     name: Terminal
     parallel: true
     path:
       windows: wt.exe
-      linux:   /usr/bin/gnome-terminal
-      darwin:  /System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal
+      linux: /usr/bin/gnome-terminal
+      darwin: /System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal
+    window:
+      monitor: 1
+      position: right-half
 
   # ── 5. Open the usual browser tabs (sequential, default)
   - type: url
@@ -73,9 +100,30 @@ steps:
     name: local dashboard
     url: http://localhost:3000
 
-  # ── 6. Background blocking command — wait for it to finish before continuing
+  # ── 6. Inline script — multi-line shell without escaping it into argv
+  - type: script
+    name: sync the repo
+    shell: bash
+    cwd: "{{ vars.repo }}"
+    optional: true
+    when:
+      platform: [linux, darwin]
+      exists: "{{ vars.repo }}/.git"
+    script: |
+      git fetch --all --prune
+      git pull --ff-only || echo "branch has diverged — leaving it alone"
+
+  - type: notify
+    name: ready
+    title: Dev
+    message: "Environment up at {{ time }}"
+
+# `palaunch stop Dev` runs these, then closes every process the profile started
+teardown:
   - type: command
-    name: pull latest main
+    name: stop services
     detach: false
-    cwd: "~/projects/main"
-    run: ["git", "pull", "--ff-only", "origin", "main"]
+    timeout: 60
+    cwd: "{{ vars.repo }}"
+    run: ["docker", "compose", "down"]
+    optional: true
