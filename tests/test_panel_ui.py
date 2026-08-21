@@ -77,7 +77,7 @@ def test_a_setting_forced_by_the_environment_is_called_out(gui, monkeypatch):
     settings.reload()
     from launcher.panel import _Panel
 
-    window = _Panel()
+    window = gui.build(_Panel)
     try:
         window.root.update()
         notes = [
@@ -196,7 +196,7 @@ def test_the_hud_offers_settings_below_the_profiles(gui, write_profile):
     from launcher.hud import _Hud
 
     write_profile("dev", "name: Dev\nsteps: []\n")
-    hud = _Hud(discover_profiles(), execute=False)
+    hud = gui.build(_Hud, discover_profiles(), execute=False)
     try:
         hud.root.update()
         assert [entry.name for entry in hud.filtered] == ["Dev", "Settings"]
@@ -209,7 +209,7 @@ def test_searching_for_settings_puts_it_first(gui, write_profile):
     from launcher.hud import _Hud
 
     write_profile("dev", "name: Dev\nsteps: []\n")
-    hud = _Hud(discover_profiles(), execute=False)
+    hud = gui.build(_Hud, discover_profiles(), execute=False)
     try:
         hud.root.update()
         hud.query.set("sett")
@@ -224,7 +224,7 @@ def test_picking_the_settings_row_opens_the_panel(gui):
 
     opened = []
     actions = [Action("Settings", "Configure", lambda: opened.append(True))]
-    hud = _Hud([], execute=True, actions=actions)
+    hud = gui.build(_Hud, [], execute=True, actions=actions)
     hud.root.update()
     hud.index = 0
     hud._commit()
@@ -239,7 +239,7 @@ def test_control_comma_opens_the_panel_from_anywhere(gui, write_profile):
     write_profile("dev", "name: Dev\nsteps: []\n")
     opened = []
     actions = [Action("Settings", "Configure", lambda: opened.append(True))]
-    hud = _Hud(discover_profiles(), execute=True, actions=actions)
+    hud = gui.build(_Hud, discover_profiles(), execute=True, actions=actions)
     hud.root.update()
     hud.index = 0  # sitting on Dev, not on the Settings row
     hud._open_settings()
@@ -250,7 +250,7 @@ def test_edit_and_stop_ignore_an_action(gui, monkeypatch):
     from launcher.hud import Action, _Hud
 
     monkeypatch.setattr("launcher.editor.edit_profile", lambda _p: pytest.fail("edited an action"))
-    hud = _Hud([], execute=True, actions=[Action("Settings", "Configure", lambda: None)])
+    hud = gui.build(_Hud, [], execute=True, actions=[Action("Settings", "Configure", lambda: None)])
     try:
         hud.root.update()
         assert hud._edit_selected() == "break"
@@ -263,7 +263,7 @@ def test_edit_and_stop_ignore_an_action(gui, monkeypatch):
 def test_the_hud_opens_with_no_profiles_at_all(gui):
     from launcher.hud import _Hud
 
-    hud = _Hud([], execute=True)
+    hud = gui.build(_Hud, [], execute=True)
     try:
         hud.root.update()
         assert [entry.name for entry in hud.filtered] == ["Settings"]
@@ -278,6 +278,23 @@ def test_the_default_settings_action_reaches_open_panel():
     (action,) = default_actions()
     assert action.name == "Settings"
     assert "config" in action.tags
+
+
+def test_a_broken_tk_skips_instead_of_erroring(gui):
+    """Tk that imports but cannot open a window must not fail the suite.
+
+    The Windows CI runners ship a Python whose Tcl/Tk data files are missing:
+    `import tkinter` works and every `Tk()` raises. That is the environment's
+    problem, not this project's, so it skips.
+    """
+
+    def explode():
+        raise gui.TclError("Can't find a usable init.tcl")
+
+    with pytest.raises(pytest.skip.Exception) as caught:
+        gui.build(explode)
+    assert "Tk cannot open a window here" in str(caught.value)
+    assert "init.tcl" in str(caught.value)
 
 
 # ── helpers ──────────────────────────────────────────────────────────────

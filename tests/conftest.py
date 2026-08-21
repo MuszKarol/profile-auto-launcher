@@ -50,20 +50,36 @@ def no_notifications(monkeypatch):
     monkeypatch.setattr("launcher.notify.notify", lambda *_a, **_k: None)
 
 
+class _Gui:
+    """Builds Tk windows, turning "Tk does not work here" into a skip.
+
+    A throwaway probe root would be the obvious guard and is the wrong one:
+    a failed `Tk()` leaves the interpreter part-initialised, so the *next*
+    `Tk()` gets further before failing — the probe passes and the real window
+    still explodes. Windows CI runners ship a Python whose Tcl/Tk data files
+    are missing and do exactly that. So there is one attempt per window, and
+    it is the real one.
+    """
+
+    def __init__(self, tk) -> None:
+        self.tk = tk
+        self.TclError = tk.TclError
+
+    def build(self, factory, *args, **kwargs):
+        try:
+            return factory(*args, **kwargs)
+        except self.tk.TclError as exc:  # no display, or a broken Tcl/Tk
+            pytest.skip(f"Tk cannot open a window here: {exc}")
+
+
 @pytest.fixture
 def gui():
-    """The tkinter module, or a skip when no display can be opened.
+    """Window builder, or a skip when tkinter is not installed at all.
 
     CI runs the Linux jobs under Xvfb so these tests actually execute there;
-    on a headless developer box they skip instead of erroring.
+    everywhere else they skip instead of erroring.
     """
-    tk = pytest.importorskip("tkinter")
-    try:
-        probe = tk.Tk()
-    except tk.TclError as exc:  # no DISPLAY, no window server
-        pytest.skip(f"no display available: {exc}")
-    probe.destroy()
-    return tk
+    return _Gui(pytest.importorskip("tkinter"))
 
 
 @pytest.fixture
@@ -71,7 +87,7 @@ def panel(gui):
     """A built configuration panel, destroyed when the test ends."""
     from launcher.panel import _Panel
 
-    window = _Panel()
+    window = gui.build(_Panel)
     window.root.update()
     yield window
     try:
