@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "profile-auto-launcher"
-version = "0.2.0"
+version = "0.3.0"
 description = "Cross-platform workflow automation launcher with context profiles"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -37,6 +37,8 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/MuszKarol/profile-auto-launcher"
+Documentation = "https://github.com/MuszKarol/profile-auto-launcher/blob/main/docs/REFERENCE.md"
+Changelog = "https://github.com/MuszKarol/profile-auto-launcher/blob/main/CHANGELOG.md"
 Issues = "https://github.com/MuszKarol/profile-auto-launcher/issues"
 
 [project.optional-dependencies]
@@ -64,6 +66,9 @@ palaunchw = "launcher.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+launcher = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

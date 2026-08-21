@@ -195,3 +195,50 @@ def test_has_secret_detects_references_in_containers():
     assert interp.has_secret("{{ secret.a }}")
     assert interp.has_secret(["x", {"k": "{{ secret.a }}"}])
     assert not interp.has_secret(["x", {"k": "{{ vars.a }}"}])
+
+
+# ── subprocess environments ──────────────────────────────────────────────
+
+
+def test_an_empty_env_means_inherit_the_parent():
+    """A `when: {command: …}` evaluated with no env must still be able to run.
+
+    Handing Windows an empty environment block makes CreateProcess fail before
+    the program starts, which turned every such condition into False there.
+    """
+    from launcher.config import subprocess_env
+
+    assert subprocess_env({}) is None
+    assert subprocess_env(None) is None
+
+
+def test_a_populated_env_is_passed_through_on_posix(monkeypatch):
+    from launcher import config
+
+    monkeypatch.setattr(config, "PLATFORM", "linux")
+    assert config.subprocess_env({"A": "1"}) == {"A": "1"}
+
+
+def test_windows_gets_the_variables_a_process_cannot_start_without(monkeypatch):
+    from launcher import config
+
+    monkeypatch.setattr(config, "PLATFORM", "windows")
+    monkeypatch.setenv("SystemRoot", r"C:\Windows")
+    monkeypatch.setenv("ComSpec", r"C:\Windows\cmd.exe")
+    result = config.subprocess_env({"MY_VAR": "1"})
+    assert result["MY_VAR"] == "1"
+    assert result["SystemRoot"] == r"C:\Windows"
+
+
+def test_windows_does_not_add_a_second_path_under_another_case(monkeypatch):
+    from launcher import config
+
+    monkeypatch.setattr(config, "PLATFORM", "windows")
+    monkeypatch.setenv("PATH", "/parent")
+    result = config.subprocess_env({"PATH": "/child"})
+    assert [key for key in result if key.upper() == "PATH"] == ["PATH"]
+    assert result["PATH"] == "/child"
+
+
+def test_a_command_condition_runs_with_an_empty_env():
+    assert conditions.matches({"command": [sys.executable, "-c", "pass"]}, {})

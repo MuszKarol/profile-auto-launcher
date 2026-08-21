@@ -23,6 +23,8 @@ SRC = os.path.join(SPECPATH, "..", "src")  # noqa: F821 - injected by PyInstalle
 hidden = [
     "launcher.editor",
     "launcher.hud",
+    "launcher.panel",
+    "launcher.panel_model",
     "launcher.record",
     "launcher.scheduler",
     "launcher.secrets",

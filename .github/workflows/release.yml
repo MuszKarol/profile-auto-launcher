@@ -14,9 +14,8 @@ permissions:
   contents: read
 
 env:
-  # workflow_dispatch has no tag, so everything falls back to the pyproject
-  # version and nothing is published unless a real tag triggered the run.
-  PUBLISH: ${{ github.event_name == 'push' && !inputs.dry_run }}
+  # Never write into a runner's real user config during the smoke tests.
+  PAL_CONFIG_DIR: ${{ github.workspace }}/.pal-release
 
 jobs:
   verify:
@@ -25,15 +24,19 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
 
+      - name: Install a virtual display
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
       - run: python -m pip install -e ".[dev]"
-      - run: python -m pytest -q
+      - run: xvfb-run -a python -m pytest -q
       - run: ruff check src tests
+      - run: ruff format --check src tests
 
       - name: Read the package version
         id: version
@@ -60,8 +63,8 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -102,8 +105,8 @@ jobs:
             label: macos-x86_64
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -194,8 +197,8 @@ jobs:
           version="${{ needs.verify.outputs.version }}"
           name="palaunch-${version}-${{ matrix.label }}"
           mkdir -p "staging/$name"
-          cp README.md LICENSE "staging/$name"
-          cp -r profiles plugins "staging/$name"
+          cp README.md LICENSE CHANGELOG.md "staging/$name"
+          cp -r profiles plugins docs "staging/$name"
           if [ "${{ runner.os }}" = "Windows" ]; then
             cp dist/palaunch.exe dist/palaunchw.exe "staging/$name"
             (cd staging && 7z a -tzip "../$name.zip" "$name") > /dev/null
@@ -239,7 +242,7 @@ jobs:
       # https://pypi.org/manage/project/profile-auto-launcher/settings/publishing/
       id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           name: python-dist
           path: dist
@@ -253,8 +256,8 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
         with:
           path: artifacts
           merge-multiple: true

@@ -5,7 +5,8 @@ does the rest: tests, sdist + wheel, frozen binaries for four targets,
 provenance attestations, PyPI upload and a GitHub Release with checksums.
 
 ```bash
-# 1. bump the version in pyproject.toml, commit it
+# 1. bump the version in pyproject.toml, move CHANGELOG's "Unreleased"
+#    heading to the new version, commit both
 git commit -am "Release 0.3.0"
 
 # 2. tag it — the tag must match the pyproject version or the run fails fast
@@ -110,8 +111,8 @@ base64 -i DeveloperID.p12 | pbcopy    # value for MACOS_CERTIFICATE
 | `SHA256SUMS.txt` | GitHub Release |
 
 Each archive carries both binaries (`palaunch` and the console-free
-`palaunchw`), the sample profiles, the example plugin, the README and the
-licence — enough to run without installing Python.
+`palaunchw`), the sample profiles, the example plugin, the README, the
+changelog, `docs/` and the licence — enough to run without installing Python.
 
 ## If a release goes wrong
 

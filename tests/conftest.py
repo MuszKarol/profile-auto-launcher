@@ -48,3 +48,33 @@ def write_profile(profiles_dir):
 def no_notifications(monkeypatch):
     """Keep tests from firing real desktop toasts."""
     monkeypatch.setattr("launcher.notify.notify", lambda *_a, **_k: None)
+
+
+@pytest.fixture
+def gui():
+    """The tkinter module, or a skip when no display can be opened.
+
+    CI runs the Linux jobs under Xvfb so these tests actually execute there;
+    on a headless developer box they skip instead of erroring.
+    """
+    tk = pytest.importorskip("tkinter")
+    try:
+        probe = tk.Tk()
+    except tk.TclError as exc:  # no DISPLAY, no window server
+        pytest.skip(f"no display available: {exc}")
+    probe.destroy()
+    return tk
+
+
+@pytest.fixture
+def panel(gui):
+    """A built configuration panel, destroyed when the test ends."""
+    from launcher.panel import _Panel
+
+    window = _Panel()
+    window.root.update()
+    yield window
+    try:
+        window.root.destroy()
+    except gui.TclError:
+        pass

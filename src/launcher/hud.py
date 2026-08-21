@@ -4,6 +4,10 @@ Keyboard-first: type to filter (fuzzy), ↑/↓ to move, → to preview the step
 Enter to run, Ctrl+E to edit, Ctrl+K to stop a running profile, Esc to close.
 After picking, the HUD streams per-step results live, so you see exactly which
 steps succeeded — then auto-closes on success.
+
+The list also carries `Action` entries — "Settings" opens the configuration
+panel. They are filtered and picked exactly like profiles, so the launcher is
+the single entry point to everything rather than one of two.
 """
 
 from __future__ import annotations
@@ -12,6 +16,7 @@ import queue
 import threading
 import tkinter as tk
 from collections.abc import Callable
+from dataclasses import dataclass, field
 
 from launcher import theme
 from launcher.config import Profile
@@ -23,6 +28,40 @@ from launcher.executor import (
     stop_profile,
 )
 from launcher.state import load_state
+
+
+@dataclass
+class Action:
+    """A non-profile row in the HUD. Duck-types the attributes rows read."""
+
+    name: str
+    description: str
+    run: Callable[[], None]
+    icon: str = "⚙"
+    hint: str = ""
+    tags: list[str] = field(default_factory=list)
+    steps: tuple = ()
+    default: bool = False
+    hotkey: str = ""
+
+
+def default_actions() -> list[Action]:
+    """The actions every HUD offers. Kept a function so tests can substitute."""
+
+    def open_settings() -> None:
+        from launcher.panel import open_panel
+
+        open_panel()
+
+    return [
+        Action(
+            name="Settings",
+            description="Configure the launcher, profiles, secrets and sync",
+            run=open_settings,
+            tags=["settings", "config", "preferences", "options"],
+            hint="open panel",
+        )
+    ]
 
 
 def _fuzzy_score(q: str, text: str) -> int | None:
@@ -42,7 +81,8 @@ def _fuzzy_score(q: str, text: str) -> int | None:
     return None
 
 
-def _match(q: str, p: Profile) -> int | None:
+def _match(q: str, p: Profile | Action) -> int | None:
+    """Best score across a row's name, description and tags — or None."""
     scores = [
         _fuzzy_score(q, p.name),
         _fuzzy_score(q, p.description),
@@ -62,7 +102,12 @@ def _active_names() -> set[str]:
 
 
 class _Hud:
-    def __init__(self, profiles: list[Profile], execute: bool) -> None:
+    def __init__(
+        self,
+        profiles: list[Profile],
+        execute: bool,
+        actions: list[Action] | None = None,
+    ) -> None:
         from launcher import settings
 
         self.conf = settings.load()
@@ -71,8 +116,9 @@ class _Hud:
         self.mono = theme.mono_family()
 
         self.profiles = profiles
+        self.actions = list(actions if actions is not None else default_actions())
         self.execute = execute
-        self.filtered: list[Profile] = list(profiles)
+        self.filtered: list[Profile | Action] = [*profiles, *self.actions]
         self.index = 0
         self.rows: list[tk.Frame] = []
         self.chosen: Profile | None = None
@@ -174,7 +220,10 @@ class _Hud:
 
         self.footer = tk.Label(
             self.outer,
-            text="↑↓ navigate    ⏎ run    → preview    ctrl+e edit    ctrl+k stop    esc close",
+            text=(
+                "↑↓ navigate    ⏎ run    → preview    ctrl+e edit    "
+                "ctrl+k stop    ctrl+, settings    esc close"
+            ),
             bg=pal.bg,
             fg=pal.muted,
             font=(self.font, 9),
@@ -191,6 +240,7 @@ class _Hud:
         self.root.bind("<Tab>", lambda _e: self._set_preview(not self.preview_open))
         self.root.bind("<Control-e>", self._edit_selected)
         self.root.bind("<Control-k>", self._stop_selected)
+        self.root.bind("<Control-comma>", self._open_settings)
         self.root.bind("<FocusOut>", self._maybe_close_on_blur)
         self._redraw()
 
@@ -226,7 +276,12 @@ class _Hud:
                 sp[1].name.lower(),
             )
         )
-        self.filtered = [p for _, p in scored]
+        # Actions sit below the profiles unless the query names one directly,
+        # so typing a profile name never puts "Settings" under the cursor.
+        actions = [(a, _match(q, a)) for a in self.actions]
+        matched = [a for a, score in actions if score is not None]
+        exact = [a for a, score in actions if score is not None and score >= 80]
+        self.filtered = [*exact, *[p for _, p in scored], *[a for a in matched if a not in exact]]
         self.index = min(self.index, max(len(self.filtered) - 1, 0))
 
         for row in self.rows:
@@ -280,15 +335,18 @@ class _Hud:
                 anchor="w",
             ).pack(fill="x")
 
-        tk.Label(
-            row, text=f"{len(p.steps)} steps", bg=pal.panel, fg=pal.muted, font=(self.font, 9)
-        ).pack(side="right")
-        if p.name in self.active:
-            tk.Label(row, text="● running", bg=pal.panel, fg=pal.ok, font=(self.font, 9)).pack(
-                side="right", padx=(0, 10)
-            )
+        tail = p.hint if isinstance(p, Action) else f"{len(p.steps)} steps"
+        tk.Label(row, text=tail, bg=pal.panel, fg=pal.muted, font=(self.font, 9)).pack(side="right")
+        if isinstance(p, Action):
+            badge = None
+        elif p.name in self.active:
+            badge = ("● running", pal.ok)
         elif p.name == self.last_profile:
-            tk.Label(row, text="↺ recent", bg=pal.panel, fg=pal.accent, font=(self.font, 9)).pack(
+            badge = ("↺ recent", pal.accent)
+        else:
+            badge = None
+        if badge is not None:
+            tk.Label(row, text=badge[0], bg=pal.panel, fg=badge[1], font=(self.font, 9)).pack(
                 side="right", padx=(0, 10)
             )
 
@@ -344,6 +402,17 @@ class _Hud:
         if not self.filtered:
             return
         profile = self.filtered[self.index]
+        if isinstance(profile, Action):
+            tk.Label(
+                self.preview_frame,
+                text=profile.description,
+                bg=pal.panel,
+                fg=pal.muted,
+                font=(self.font, 10),
+                wraplength=240,
+                justify="left",
+            ).pack(fill="x")
+            return
         tk.Label(
             self.preview_frame,
             text=profile.name,
@@ -399,6 +468,8 @@ class _Hud:
         if self.running or not self.filtered:
             return "break"
         profile = self.filtered[self.index]
+        if isinstance(profile, Action):
+            return "break"
         self.chosen = None
         self.root.destroy()
         from launcher.editor import edit_profile
@@ -410,6 +481,8 @@ class _Hud:
         if self.running or not self.filtered:
             return "break"
         profile = self.filtered[self.index]
+        if isinstance(profile, Action):
+            return "break"
         self.running = True
         self._build_progress(profile, verb="Stopping")
 
@@ -426,6 +499,18 @@ class _Hud:
         self.root.after(60, self._poll_results)
         return "break"
 
+    def _open_settings(self, _event=None) -> str:
+        """Ctrl+, — the same thing the Settings row does, without searching."""
+        if self.running:
+            return "break"
+        action = next((a for a in self.actions if a.name == "Settings"), None)
+        if action is None:
+            return "break"
+        self.chosen = None
+        self.root.destroy()
+        action.run()
+        return "break"
+
     def _cancel(self, _event=None) -> None:
         self.chosen = None
         self.root.destroy()
@@ -434,7 +519,13 @@ class _Hud:
     def _commit(self, _event=None) -> None:
         if self.running or not self.filtered:
             return
-        self.chosen = self.filtered[self.index]
+        selected = self.filtered[self.index]
+        if isinstance(selected, Action):
+            self.chosen = None
+            self.root.destroy()
+            selected.run()
+            return
+        self.chosen = selected
         if not self.execute:
             self.root.destroy()
             return
@@ -558,11 +649,12 @@ _active_hud: _Hud | None = None
 def pick_and_run(profiles: list[Profile]) -> int:
     """Open the HUD; on Enter, execute the profile with live step feedback.
 
+    Opens even with no profiles at all — the Settings row is how a first-time
+    user gets to the panel that creates one.
+
     Returns a process exit code (0 = success / cancelled, 1 = failed steps).
     """
     global _active_hud
-    if not profiles:
-        return 1
     hud = _Hud(profiles, execute=True)
     with _active_lock:
         _active_hud = hud
