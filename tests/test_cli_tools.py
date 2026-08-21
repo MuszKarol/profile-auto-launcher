@@ -337,3 +337,64 @@ def test_sync_commits_local_changes(profiles_dir, monkeypatch):
 def test_sync_status_shows_the_branch(profiles_dir):
     sync.init("https://example.com/profiles.git")
     assert "https://example.com/profiles.git" in sync.status()
+
+
+# ── settings panel wiring ────────────────────────────────────────────────
+
+
+def test_settings_opens_the_panel(monkeypatch):
+    opened = []
+    monkeypatch.setitem(sys.modules, "launcher.panel", _FakePanel(opened))
+    assert main(["settings"]) == 0
+    assert opened == ["Settings"]
+
+
+def test_settings_can_open_a_named_section(monkeypatch):
+    opened = []
+    monkeypatch.setitem(sys.modules, "launcher.panel", _FakePanel(opened))
+    assert main(["settings", "History"]) == 0
+    assert opened == ["History"]
+
+
+def test_settings_rejects_an_unknown_section():
+    with pytest.raises(SystemExit):
+        main(["settings", "Nonsense"])
+
+
+def test_config_gui_opens_the_panel(monkeypatch):
+    opened = []
+    monkeypatch.setitem(sys.modules, "launcher.panel", _FakePanel(opened))
+    assert main(["config", "gui"]) == 0
+    assert opened == ["Settings"]
+
+
+def test_settings_explains_a_missing_tkinter(monkeypatch, capsys):
+    import builtins
+
+    real_import = builtins.__import__
+
+    def no_tkinter(name, *args, **kwargs):
+        if name in ("launcher.panel", "tkinter"):
+            raise ImportError("No module named 'tkinter'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.delitem(sys.modules, "launcher.panel", raising=False)
+    monkeypatch.setattr(builtins, "__import__", no_tkinter)
+    assert main(["settings"]) == 1
+    err = capsys.readouterr().err
+    assert "needs tkinter" in err
+    assert "python3-tk" in err
+    assert "palaunch config set" in err
+
+
+class _FakePanel:
+    """Stands in for `launcher.panel` so the CLI wiring is testable headless."""
+
+    SECTIONS = ("Settings", "Profiles", "Secrets", "Sync", "History", "Logs", "Paths")
+
+    def __init__(self, sink: list) -> None:
+        self._sink = sink
+
+    def open_panel(self, section: str = "Settings") -> int:
+        self._sink.append(section)
+        return 0

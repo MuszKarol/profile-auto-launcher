@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from launcher import conditions, interp
-from launcher.config import PLATFORM, Profile, Step
+from launcher.config import PLATFORM, Profile, Step, subprocess_env
 from launcher.logging_setup import get_logger
 
 log = get_logger("executor")
@@ -123,7 +123,7 @@ def _spawn(
     argv: list[str], *, env: dict[str, str], cwd: str | None, detach: bool
 ) -> subprocess.Popen:
     """Launch a process fully detached so it outlives the launcher."""
-    kwargs: dict = {"env": env, "cwd": cwd, "close_fds": True}
+    kwargs: dict = {"env": subprocess_env(env), "cwd": cwd, "close_fds": True}
     if detach:
         if PLATFORM == "windows":
             DETACHED_PROCESS = 0x00000008
@@ -196,7 +196,7 @@ async def _exec_argv(step: Step, run: RunContext, argv: list[str]) -> StepResult
             return StepResult(step, True, detail + await _place_window(step, run, proc.pid))
         process = await asyncio.create_subprocess_exec(
             *argv,
-            env=run.env,
+            env=subprocess_env(run.env),
             cwd=cwd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -374,7 +374,7 @@ async def _probe_command(argv: list[str], env: dict[str, str]) -> bool:
     try:
         proc = await asyncio.create_subprocess_exec(
             *argv,
-            env=env,
+            env=subprocess_env(env),
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
             creationflags=_NO_WINDOW,
@@ -534,7 +534,7 @@ async def _plugin_step(step: Step, run: RunContext) -> StepResult:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env=run.env,
+            env=subprocess_env(run.env),
             cwd=_value(step.cwd, run),
             creationflags=_NO_WINDOW,
         )

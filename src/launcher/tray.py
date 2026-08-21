@@ -55,6 +55,7 @@ def run_tray(
     on_open_hud: Callable[[], None],
     on_stop: Callable[[Profile], None] | None = None,
     on_quit: Callable[[], None] | None = None,
+    on_settings: Callable[[], None] | None = None,
 ) -> None:
     """Block on the tray event loop.
 
@@ -80,6 +81,14 @@ def run_tray(
 
     def label(profile: Profile) -> str:
         return f"{profile.icon} {profile.name}" if profile.icon else profile.name
+
+    def open_settings() -> None:
+        if on_settings is not None:
+            on_settings()
+            return
+        from launcher.panel import open_panel
+
+        open_panel()
 
     def build_menu(current: list[Profile]) -> pystray.Menu:
         from launcher import procs
@@ -123,6 +132,7 @@ def run_tray(
 
         items += [
             pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Settings…", lambda _i, _it: in_thread(open_settings)),
             pystray.MenuItem("Reload profiles", lambda _i, _it: rebuild(force=True)),
             pystray.MenuItem("Quit", lambda icon, _it: shutdown(icon)),
         ]

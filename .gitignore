@@ -11,3 +11,7 @@ build/
 *.log
 .DS_Store
 .idea/
+results.xml
+staging/
+.pal-ci/
+.pal-release/

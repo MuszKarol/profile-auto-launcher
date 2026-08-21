@@ -104,6 +104,35 @@ PLATFORM_KEYED_FIELDS = (
 )
 
 
+# Variables Windows needs in a child's environment block: without SystemRoot
+# the loader cannot resolve system DLLs and CreateProcess fails outright, and
+# ComSpec is what `cmd`-based steps resolve. A profile `env:` step is additive,
+# so borrowing them from the parent is what the author meant either way.
+_WINDOWS_ESSENTIAL_ENV = ("SystemRoot", "ComSpec", "PATH", "PATHEXT")
+
+
+def subprocess_env(env: dict[str, str] | None) -> dict[str, str] | None:
+    """Make `env` safe to hand to `subprocess`/`asyncio` on every platform.
+
+    Returns None (inherit the parent environment) for an empty mapping, and on
+    Windows fills in the handful of variables a process cannot start without.
+    Windows treats variable names case-insensitively, so presence is checked
+    that way too — injecting a second `PATH` under a different case would give
+    the child two of them.
+    """
+    if not env:
+        return None
+    if PLATFORM != "windows":
+        return env
+    present = {key.upper() for key in env}
+    missing = {
+        key: os.environ[key]
+        for key in _WINDOWS_ESSENTIAL_ENV
+        if key.upper() not in present and key in os.environ
+    }
+    return {**missing, **env} if missing else env
+
+
 def config_dir() -> Path:
     override = os.environ.get("PAL_CONFIG_DIR")
     if override:

@@ -15,7 +15,7 @@ from datetime import time as dtime
 from pathlib import Path
 from typing import Any
 
-from launcher.config import PLATFORM
+from launcher.config import PLATFORM, subprocess_env
 
 KNOWN_WHEN_KEYS = frozenset(
     {
@@ -80,7 +80,7 @@ def _probe_command(spec: Any, env: dict[str, str], expand) -> bool:
             capture_output=True,
             timeout=10,
             check=False,
-            env=env,
+            env=subprocess_env(env),
             creationflags=_NO_WINDOW,
         )
     except (OSError, subprocess.SubprocessError):

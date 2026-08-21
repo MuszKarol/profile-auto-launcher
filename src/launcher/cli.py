@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import argparse
 import os
-import subprocess
 import sys
 import time
 from pathlib import Path
 
 from launcher.config import (
-    PLATFORM,
     Profile,
     config_dir,
     default_profile,
@@ -22,6 +20,10 @@ from launcher.config import (
 )
 from launcher.executor import dry_run_profile, format_result, run_profile
 from launcher.notify import notify
+
+# Mirrors launcher.panel.SECTIONS. Duplicated on purpose: importing the panel
+# would drag tkinter into every `palaunch --help`, and a test pins them equal.
+PANEL_SECTIONS = ("Settings", "Profiles", "Secrets", "Sync", "History", "Logs", "Paths")
 
 _NEW_PROFILE_TEMPLATE = """\
 {modeline}
@@ -109,18 +111,10 @@ def _require(name: str | None) -> Profile | None:
 
 
 def _open_in_editor(path: Path) -> int:
-    from launcher import settings
+    from launcher.panel_model import open_path
 
-    editor = settings.load().editor or os.environ.get("EDITOR") or os.environ.get("VISUAL")
     try:
-        if editor:
-            subprocess.run([editor, str(path)], check=False)
-        elif PLATFORM == "windows":
-            os.startfile(str(path))  # type: ignore[attr-defined]
-        elif PLATFORM == "darwin":
-            subprocess.run(["open", str(path)], check=False)
-        else:
-            subprocess.run(["xdg-open", str(path)], check=False)
+        open_path(path)
     except OSError as exc:
         print(f"Could not open editor: {exc}", file=sys.stderr)
         return 1
@@ -328,11 +322,9 @@ def _cmd_edit(args: argparse.Namespace) -> int:
 def _cmd_pick(_args: argparse.Namespace) -> int:
     from launcher.hud import pick_and_run
 
-    profiles = discover_profiles()
-    if not profiles:
-        print("No profiles to pick from.", file=sys.stderr)
-        return 1
-    return pick_and_run(profiles)
+    # Opens even with nothing to pick: the HUD's Settings row is the way in
+    # for someone who has not written a profile yet.
+    return pick_and_run(discover_profiles())
 
 
 def _cmd_tray(args: argparse.Namespace) -> int:
@@ -513,6 +505,8 @@ def _cmd_config(args: argparse.Namespace) -> int:
     from launcher import settings
     from launcher.config import settings_path
 
+    if args.config_cmd == "gui":
+        return _open_panel()
     if args.config_cmd == "path":
         print(settings_path())
         return 0
@@ -550,6 +544,26 @@ def _cmd_config(args: argparse.Namespace) -> int:
     for key in sorted(conf):
         print(f"{key:<20} {conf[key]}")
     return 0
+
+
+def _open_panel(section: str = "Settings") -> int:
+    """Open the configuration panel, or explain why it cannot be opened.
+
+    Some Linux distributions ship Python without tkinter; the failure should
+    name the package to install rather than surface an ImportError traceback.
+    """
+    try:
+        from launcher.panel import open_panel
+    except ImportError as exc:
+        print(f"The settings panel needs tkinter ({exc}).", file=sys.stderr)
+        print("Debian/Ubuntu: sudo apt install python3-tk", file=sys.stderr)
+        print("Meanwhile `palaunch config set <key> <value>` does the same job.", file=sys.stderr)
+        return 1
+    return open_panel(section)
+
+
+def _cmd_settings(args: argparse.Namespace) -> int:
+    return _open_panel(args.section)
 
 
 def _cmd_secret(args: argparse.Namespace) -> int:
@@ -719,7 +733,18 @@ def build_parser() -> argparse.ArgumentParser:
     set_p.add_argument("key")
     set_p.add_argument("value")
     config_sub.add_parser("path", help="Print the settings file path")
+    config_sub.add_parser("gui", help="Open the graphical configuration panel")
     config_p.set_defaults(func=_cmd_config, config_cmd="list")
+
+    settings_p = sub.add_parser("settings", help="Open the graphical configuration panel")
+    settings_p.add_argument(
+        "section",
+        nargs="?",
+        default="Settings",
+        choices=list(PANEL_SECTIONS),
+        help="Which page to open (default: Settings)",
+    )
+    settings_p.set_defaults(func=_cmd_settings)
 
     secret_p = sub.add_parser("secret", help="Manage secrets in the OS credential store")
     secret_sub = secret_p.add_subparsers(dest="secret_cmd")

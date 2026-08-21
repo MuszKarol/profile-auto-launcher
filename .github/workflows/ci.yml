@@ -10,6 +10,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Never touch a runner's real user config, and keep `palaunch validate`
+  # looking at the profiles this job created rather than at leftovers.
+  PAL_CONFIG_DIR: ${{ github.workspace }}/.pal-ci
+
 jobs:
   test:
     name: ${{ matrix.os }} · py${{ matrix.python }}
@@ -26,30 +31,55 @@ jobs:
             python: "3.13"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
           cache: pip
+
+      # The HUD, profile editor and settings panel are Tk windows, and their
+      # tests skip themselves when no display can be opened. Xvfb is what makes
+      # them actually run on Linux instead of quietly passing.
+      - name: Install a virtual display (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb
 
       - name: Install
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
+      - name: Report GUI test coverage
+        shell: bash
+        run: |
+          if python -c "import tkinter" 2>/dev/null; then
+            echo "tkinter is available — the GUI tests will run."
+          else
+            echo "::warning::tkinter is unavailable on this runner; GUI tests will skip."
+          fi
+
       - name: Test
+        if: runner.os != 'Linux'
         run: python -m pytest -q --junitxml=results.xml
+
+      - name: Test (under Xvfb)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a python -m pytest -q --junitxml=results.xml
 
       - name: Smoke-test the CLI
         shell: bash
         run: |
           palaunch --help
+          palaunch settings --help
           palaunch where
           palaunch schema --stdout > /dev/null
           palaunch new "CI Check"
           palaunch validate
           palaunch run "CI Check" --dry-run
+          palaunch config list
+          palaunch config set theme dark
+          test "$(palaunch config get theme)" = "dark"
 
       - uses: actions/upload-artifact@v4
         if: failure()
@@ -60,8 +90,8 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -73,8 +103,8 @@ jobs:
     name: Sample profiles are valid
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -83,3 +113,24 @@ jobs:
         env:
           PAL_INCLUDE_CWD: "1"
         run: palaunch validate
+
+  package:
+    name: Package builds and installs clean
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install build twine
+      - run: python -m build
+      # Catches the metadata problems that only surface at upload time, when
+      # the tag is already pushed and the release is half-done.
+      - run: python -m twine check dist/*
+      - name: Install the wheel into a clean environment
+        run: |
+          python -m venv /tmp/fresh
+          /tmp/fresh/bin/pip install dist/*.whl
+          /tmp/fresh/bin/palaunch --help > /dev/null
+          /tmp/fresh/bin/palaunch where
