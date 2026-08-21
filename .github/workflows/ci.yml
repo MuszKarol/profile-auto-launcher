@@ -50,13 +50,22 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
+      # Importing tkinter is not enough: the Windows runners ship a Python
+      # whose Tcl/Tk data files are missing, so the import succeeds and every
+      # window still fails. Opening one is the only honest check.
       - name: Report GUI test coverage
         shell: bash
         run: |
-          if python -c "import tkinter" 2>/dev/null; then
-            echo "tkinter is available — the GUI tests will run."
+          probe='import tkinter; tkinter.Tk().destroy()'
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            probe_cmd="xvfb-run -a python -c"
           else
-            echo "::warning::tkinter is unavailable on this runner; GUI tests will skip."
+            probe_cmd="python -c"
+          fi
+          if $probe_cmd "$probe" 2>/dev/null; then
+            echo "Tk works here — the GUI tests will run."
+          else
+            echo "::warning::Tk cannot open a window on this runner; the GUI tests will skip."
           fi
 
       - name: Test
