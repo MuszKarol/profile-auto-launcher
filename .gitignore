@@ -15,3 +15,4 @@ results.xml
 staging/
 .pal-ci/
 .pal-release/
+dist-installer/

@@ -6,6 +6,75 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-09-07
+
+The interface release: one dark theme across every window, a launcher that
+opens single applications as readily as whole profiles, a real installer, and
+rsync back where it belongs.
+
+### Added
+
+- **Launch a single application by name.** `launcher.apps` indexes what is
+  installed — `.desktop` entries, Start Menu shortcuts, macOS app bundles and
+  everything on `PATH` — and the launcher lists those matches under the
+  profiles. Type `firef`, press Enter, and only Firefox opens. Ad-hoc launches
+  are tracked under "Quick launch", so `palaunch status` sees them and
+  `palaunch stop` closes them. Also `palaunch app <name>` and the manager's
+  new Launch page.
+- **The `rsync` step type**, and `palaunch sync --mirror`. `launcher.mirror`
+  uses the real rsync when it is installed — the only thing that can reach
+  `user@host:/path` — and a built-in walker for local targets when it is not,
+  so mirroring works on a bare Windows box too. `--pull` brings a directory
+  back, `--dry-run` reports without touching anything, and the Sync page
+  offers both.
+- **A real setup wizard.** `palaunch install` opens a window that copies the
+  sample profiles, writes the JSON Schema, adds a menu entry and registers the
+  login item — and `palaunch install --uninstall` removes exactly those,
+  leaving your profiles alone. `launcher.install` holds the operations with no
+  Tk in sight, so the window, the CLI, the shell scripts and the tests all
+  drive the same code.
+- **A Windows installer**: `packaging/palaunch.iss` builds
+  `palaunch-setup-<version>.exe` (per-user, no administrator prompt, entry in
+  "Apps & features", uninstaller), and the release workflow attaches it with a
+  checksum and a provenance attestation.
+- **A new-profile wizard** in place of the old name prompt: presets, a picker
+  over the installed applications, pages to open, processes to close first, a
+  side-by-side window layout — all validated through the real loader before
+  anything is written. `launcher.scaffold` is the headless half, so
+  `palaunch new --app code --url http://localhost:3000` builds the same file.
+- **An icon drawn in code.** `launcher.branding` renders the `>_` mark to PNG,
+  ICO and SVG in pure Python, for the tray, the window icons, the installers
+  and the README. A CI job regenerates `assets/` and fails if the committed
+  files have drifted.
+
+### Changed
+
+- **Every window redesigned, dark by default.** `launcher.theme` is now a real
+  token set (roles, spacing, a type scale, a font stack resolved against what
+  Tk actually has) and `launcher.ui` supplies the widgets Tk lacks — buttons,
+  segmented tabs, cards and a scrollbar that belongs to the palette. The
+  launcher sizes itself to its results instead of clipping them.
+- **The manager is five pages, not seven.** Launch, Profiles, Sync, Activity
+  and Settings; secrets and paths moved into Settings, and history and logs
+  merged into Activity. `palaunch settings <page>` follows.
+- The section list lives in `launcher.panel_model`, so the CLI no longer keeps
+  a hand-maintained copy of it.
+- The install scripts install the package and then call `palaunch install`,
+  which halved them and means a shell script and the window can never register
+  different things.
+- The tray's *Settings…* entry is now *Manager…*, and the tray icon is the app
+  mark rather than a rectangle drawn inline.
+
+### Fixed
+
+- Opening a step in the editor and saving it no longer disables it. `enabled`,
+  `detach` and `track` default to true and are usually absent from the file;
+  the form rendered them as unticked boxes and then wrote `false` back.
+- Tk images are no longer cached across interpreters — the cached window icon
+  outlived its window and raised at shutdown.
+- `theme` now defaults to `dark` rather than `auto`, which on a desktop that
+  will not say guessed light.
+
 ## [0.3.0] — 2026-08-21
 
 ### Added
@@ -71,7 +140,8 @@ All notable changes to this project are recorded here. The format follows
   system tray, hotkeys, the scheduler, lifecycle commands, the recorder,
   secrets, git sync and the graphical profile editor.
 
-[Unreleased]: https://github.com/MuszKarol/profile-auto-launcher/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/MuszKarol/profile-auto-launcher/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/MuszKarol/profile-auto-launcher/releases/tag/v1.0.0
 [0.3.0]: https://github.com/MuszKarol/profile-auto-launcher/releases/tag/v0.3.0
 [0.2.0]: https://github.com/MuszKarol/profile-auto-launcher/releases/tag/v0.2.0
 [0.1.0]: https://github.com/MuszKarol/profile-auto-launcher/releases/tag/v0.1.0
