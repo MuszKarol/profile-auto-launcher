@@ -2,7 +2,6 @@
 # step types that talk to the outside world (http, plugin).
 name: Evening
 description: Wind down — close work, run Focus, tell the house you're done
-icon: "🌙"
 tags: [routine, home]
 
 triggers:
@@ -49,6 +48,18 @@ steps:
     plugin: "~/.config/profile-auto-launcher/plugins/hello_plugin.py"
     config:
       message: "wrapped up at {{ time }}"
+
+  # Mirror the day's notes somewhere safe. rsync is used when it is installed
+  # (the only way to reach another machine); a local path works without it.
+  - type: rsync
+    name: back up notes
+    optional: true
+    src: "~/notes"
+    dest:
+      windows: "D:\\backup\\notes"
+      default: "~/backup/notes"
+    delete: true
+    exclude: ["*.tmp", ".git"]
 
   - type: notify
     title: Evening

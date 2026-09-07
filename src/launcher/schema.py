@@ -97,6 +97,14 @@ def _step_schema() -> dict[str, Any]:
             "src": _PLATFORM_KEYED,
             "dest": _PLATFORM_KEYED,
             "content": {"type": "string"},
+            "delete": {"type": "boolean", "description": "rsync: delete extraneous files"},
+            "exclude": {
+                "oneOf": [
+                    {"type": "string"},
+                    {"type": "array", "items": {"type": "string"}},
+                ]
+            },
+            "backend": {"enum": ["auto", "rsync", "builtin"]},
             "set": {"type": "object", "additionalProperties": {"type": "string"}},
             "unset": {"type": "array", "items": {"type": "string"}},
             "seconds": {"type": "number", "minimum": 0},
@@ -133,7 +141,10 @@ def build() -> dict[str, Any]:
         "properties": {
             "name": {"type": "string"},
             "description": {"type": "string"},
-            "icon": {"type": "string"},
+            "icon": {
+                "type": "string",
+                "description": "Accepted for older profiles; the interface draws no per-row icons",
+            },
             "default": {"type": "boolean"},
             "autostart": {"type": "boolean"},
             "hotkey": {"type": "string", "examples": ["<ctrl>+<alt>+d"]},

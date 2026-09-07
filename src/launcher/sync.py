@@ -1,9 +1,14 @@
-"""Git-backed sync of the profiles directory.
+"""Two ways to move the profiles directory between machines.
 
-Profiles are plain YAML, so the simplest cross-machine story is a git repo in
-the config directory. `palaunch sync` commits local edits, rebases on the
-remote and pushes — the same three commands you would type, with the error
-messages surfaced instead of swallowed.
+Git is the default: profiles are plain YAML, so a repo in the config directory
+gives history and conflict handling for free. `palaunch sync` commits local
+edits, rebases on the remote and pushes — the same three commands you would
+type, with the error messages surfaced instead of swallowed.
+
+rsync is the other, for a NAS, a USB stick or a box you can already ssh into.
+`palaunch sync --mirror` pushes the directory there and `--pull` brings it
+back, through `launcher.mirror` — the real rsync when it is installed, and a
+built-in equivalent for local targets when it is not.
 """
 
 from __future__ import annotations
@@ -116,3 +121,41 @@ def sync(message: str = "", push: bool = True) -> str:
         _git("push", "-u", "origin", branch)
         steps.append("pushed")
     return "; ".join(steps)
+
+
+# ── rsync mirror ─────────────────────────────────────────────────────────
+
+
+def mirror_target(target: str = "") -> str:
+    """The rsync destination: the argument, else the `sync_mirror` setting."""
+    if target:
+        return target
+    from launcher import settings
+
+    return settings.load().sync_mirror
+
+
+def mirror(target: str = "", pull: bool = False, delete: bool = True, dry_run: bool = False) -> str:
+    """Mirror the profiles directory to `target` (or from it, with `pull`)."""
+    from launcher import mirror as mirror_mod
+
+    destination = mirror_target(target)
+    if not destination:
+        raise SyncError(
+            "no mirror target — pass one, or set it with `palaunch config set sync_mirror <path>`"
+        )
+    directory = profiles_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    source, sink = (destination, str(directory)) if pull else (str(directory), destination)
+    try:
+        report = mirror_mod.mirror(
+            source,
+            sink,
+            delete=delete,
+            dry_run=dry_run,
+            exclude=(".git", "*.log"),
+        )
+    except mirror_mod.MirrorError as exc:
+        raise SyncError(str(exc)) from exc
+    log.info("mirrored %s -> %s (%s)", source, sink, report)
+    return f"{source} -> {sink}\n{report}"

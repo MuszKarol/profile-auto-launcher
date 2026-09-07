@@ -18,18 +18,35 @@ from PyInstaller.utils.hooks import collect_submodules
 # spec file, so `pyinstaller packaging/palaunch.spec` from the repo root would
 # otherwise look for sources one level above the repo. SPECPATH is injected by
 # PyInstaller and always points at this file's directory.
-SRC = os.path.join(SPECPATH, "..", "src")  # noqa: F821 - injected by PyInstaller
+ROOT = os.path.join(SPECPATH, "..")  # noqa: F821 - injected by PyInstaller
+SRC = os.path.join(ROOT, "src")
+ICON = os.path.join(ROOT, "assets", "icon.ico")
+
+# Bundled next to the binary so the setup wizard can copy them on first run.
+datas = [
+    (os.path.join(ROOT, "profiles"), "profiles"),
+    (os.path.join(ROOT, "plugins"), "plugins"),
+    (os.path.join(ROOT, "assets"), "assets"),
+]
 
 hidden = [
+    "launcher.apps",
+    "launcher.branding",
     "launcher.editor",
+    "launcher.fuzzy",
     "launcher.hud",
+    "launcher.install",
+    "launcher.installer",
+    "launcher.mirror",
     "launcher.panel",
     "launcher.panel_model",
     "launcher.record",
+    "launcher.scaffold",
     "launcher.scheduler",
     "launcher.secrets",
     "launcher.sync",
     "launcher.tray",
+    "launcher.ui",
     "launcher.windows",
 ]
 for optional in ("pystray", "PIL", "pynput", "keyring", "psutil"):
@@ -42,7 +59,7 @@ analysis = Analysis(
     [os.path.join(SRC, "launcher", "__main__.py")],
     pathex=[SRC],
     binaries=[],
-    datas=[],
+    datas=datas,
     hiddenimports=hidden,
     hookspath=[],
     runtime_hooks=[],
@@ -62,6 +79,7 @@ console_exe = EXE(
     console=True,
     upx=True,
     strip=False,
+    icon=ICON,
 )
 
 windowed_exe = EXE(
@@ -74,4 +92,5 @@ windowed_exe = EXE(
     console=False,
     upx=True,
     strip=False,
+    icon=ICON,
 )

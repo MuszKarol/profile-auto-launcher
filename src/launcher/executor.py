@@ -137,6 +137,17 @@ def _spawn(
     return subprocess.Popen(argv, **kwargs)
 
 
+def spawn_detached(
+    argv: list[str], cwd: str | None = None, env: dict[str, str] | None = None
+) -> subprocess.Popen:
+    """Launch-and-forget entry point for callers outside a profile run.
+
+    `launcher.apps` uses it to start a single program the same way an `app:`
+    step would, so an ad-hoc launch survives the launcher exiting.
+    """
+    return _spawn(argv, env=env if env is not None else dict(os.environ), cwd=cwd, detach=True)
+
+
 def _track(run: RunContext, step: Step, proc: subprocess.Popen, argv: list[str]) -> None:
     if not (run.track and step.track):
         return
@@ -621,6 +632,32 @@ async def _file_step(step: Step, run: RunContext) -> StepResult:
         return StepResult(step, False, str(exc))
 
 
+async def _rsync_step(step: Step, run: RunContext) -> StepResult:
+    """Mirror one directory onto another — rsync when it is installed."""
+    from launcher import mirror
+
+    source = _value(step.src, run)
+    target = _value(step.dest, run)
+    if not source or not target:
+        return StepResult(step, False, "rsync needs src and dest")
+    excludes = tuple(_values(step.exclude, run))
+
+    def perform() -> str:
+        report = mirror.mirror(
+            source,
+            target,
+            delete=step.delete,
+            exclude=excludes,
+            backend=step.backend,
+        )
+        return f"{source} -> {target}: {report}"
+
+    try:
+        return StepResult(step, True, await asyncio.to_thread(perform))
+    except (mirror.MirrorError, OSError) as exc:
+        return StepResult(step, False, str(exc))
+
+
 DISPATCH: dict[str, Callable[[Step, RunContext], Any]] = {
     "app": _launch_app,
     "command": _run_command,
@@ -635,6 +672,7 @@ DISPATCH: dict[str, Callable[[Step, RunContext], Any]] = {
     "http": _http_step,
     "plugin": _plugin_step,
     "file": _file_step,
+    "rsync": _rsync_step,
 }
 
 
@@ -825,6 +863,9 @@ def describe_step(step: Step) -> str:
         return f"{step.method} {step.url}"
     if step.type == "plugin":
         return f"invoke plugin {step.plugin}"
+    if step.type == "rsync":
+        flags = " --delete" if step.delete else ""
+        return f"mirror {step.src} -> {step.dest}{flags}"
     if step.type == "file":
         if step.action in ("write", "append", "mkdir", "remove"):
             return f"{step.action} {step.dest}"

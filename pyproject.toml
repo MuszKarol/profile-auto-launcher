@@ -4,15 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "profile-auto-launcher"
-version = "0.3.0"
-description = "Cross-platform workflow automation launcher with context profiles"
+version = "1.0.0"
+description = "Launch a whole working context — apps, tabs and services — from one window"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-keywords = ["launcher", "automation", "workflow", "productivity", "profiles"]
+keywords = ["launcher", "automation", "workflow", "productivity", "profiles", "rsync"]
 authors = [{ name = "Karol Musz" }]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Environment :: Console",
     "Environment :: Win32 (MS Windows)",
     "Environment :: X11 Applications",
@@ -63,6 +63,7 @@ palaunch = "launcher.cli:main"
 
 [project.gui-scripts]
 palaunchw = "launcher.cli:main"
+palaunch-setup = "launcher.installer:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -1,9 +1,9 @@
-"""The panel and the HUD driven as real Tk windows.
+"""The manager window, the wizard and the HUD driven as real Tk windows.
 
 Skipped when no display can be opened; CI runs the Linux jobs under Xvfb so
 these do execute there. What they check is the wiring the model cannot see:
 that every page builds, that the widgets round-trip a value into
-`settings.yaml`, and that the HUD's Settings row leads to the panel.
+`settings.yaml`, and that typing a name in the launcher finds what it should.
 """
 
 from __future__ import annotations
@@ -34,19 +34,21 @@ def test_the_settings_form_shows_the_stored_values(panel):
 
 
 def test_saving_the_form_writes_settings_yaml(panel):
-    panel.widgets["theme"][0].var.set("dark")
+    panel._show("Settings")
+    panel.widgets["theme"][0].var.set("light")
     panel.widgets["hotkey"][0].var.set("<ctrl>+<space>")
     panel._save_settings()
 
     from launcher.config import settings_path
 
-    assert "theme: dark" in settings_path().read_text(encoding="utf-8")
+    assert "theme: light" in settings_path().read_text(encoding="utf-8")
     assert settings.load().hotkey == "<ctrl>+<space>"
     assert "Saved 2 change(s)" in panel.status.cget("text")
 
 
 def test_saving_an_invalid_value_reports_it_and_writes_nothing(panel, monkeypatch):
     monkeypatch.setattr("tkinter.messagebox.showerror", lambda *a, **k: None)
+    panel._show("Settings")
     panel.widgets["max_parallel"][0].var.set("lots")
     panel._save_settings()
 
@@ -57,6 +59,7 @@ def test_saving_an_invalid_value_reports_it_and_writes_nothing(panel, monkeypatc
 
 
 def test_saving_nothing_says_so(panel):
+    panel._show("Settings")
     panel._save_settings()
     assert "No changes" in panel.status.cget("text")
 
@@ -79,6 +82,7 @@ def test_a_setting_forced_by_the_environment_is_called_out(gui, monkeypatch):
 
     window = gui.build(_Panel)
     try:
+        window._show("Settings")
         window.root.update()
         notes = [
             child.cget("text")
@@ -136,43 +140,90 @@ def test_actions_need_a_selection(panel):
     assert "Select a profile first" in panel.status.cget("text")
 
 
-def test_the_history_page_renders_a_run(panel, write_profile):
+def test_the_activity_page_renders_a_run_and_its_step_stats(panel, write_profile):
     from launcher.cli import main
 
     write_profile("dev", "name: Dev\nsteps:\n  - {type: wait, name: pause, seconds: 0}\n")
     main(["run", "Dev"])
-    panel._show("History")
-    assert "Dev" in panel.history_output.get("1.0", "end")
+    panel._show("Activity")
+    assert "Dev" in panel.activity_output.get("1.0", "end")
 
-    panel.history_view.set("stats")
-    panel._refresh_history()
-    assert "pause" in panel.history_output.get("1.0", "end")
-
-
-def test_the_history_page_survives_a_nonsense_limit(panel):
-    panel._show("History")
-    panel.history_limit.var.set("many")
-    panel._refresh_history()
-    assert "No history yet" in panel.history_output.get("1.0", "end")
+    panel.activity_view.set("stats")
+    panel._refresh_activity()
+    assert "pause" in panel.activity_output.get("1.0", "end")
 
 
-def test_the_logs_page_shows_what_was_logged(panel):
+def test_the_activity_page_survives_a_nonsense_limit(panel):
+    panel._show("Activity")
+    panel.activity_limit.var.set("many")
+    panel._refresh_activity()
+    assert "No history yet" in panel.activity_output.get("1.0", "end")
+
+
+def test_the_activity_page_shows_the_log(panel):
     from launcher.logging_setup import get_logger, setup
 
     setup()
     get_logger("test").warning("a line worth finding")
-    panel._show("Logs")
-    panel._refresh_logs()
-    assert "a line worth finding" in panel.log_output.get("1.0", "end")
+    panel._show("Activity")
+    panel.activity_view.set("log")
+    panel._refresh_activity()
+    assert "a line worth finding" in panel.activity_output.get("1.0", "end")
 
 
-def test_the_paths_page_writes_the_schema(panel):
+def test_the_settings_page_writes_the_schema(panel):
     from launcher import schema
 
-    panel._show("Paths")
+    panel._show("Settings")
     panel._write_schema()
     _settle(panel)
     assert schema.schema_path().is_file()
+
+
+# ── the launch page ──────────────────────────────────────────────────────
+
+
+def test_the_launch_page_lists_profiles_and_runs_one(panel, write_profile):
+    write_profile("dev", "name: Dev\nsteps:\n  - {type: wait, name: pause, seconds: 0}\n")
+    panel._show("Launch")
+    panel.launch_query.var.set("dev")
+    panel._refresh_launch()
+    assert panel.launch_rows[0]["name"] == "Dev"
+    assert panel.launch_rows[0]["kind"] == "profile"
+
+    panel.launch_list.selection_set(0)
+    panel._launch_selected(dry=True)
+    _settle(panel)
+    assert "Dry run Dev" in panel.status.cget("text")
+
+
+def test_the_launch_page_offers_an_installed_app(panel, monkeypatch):
+    from launcher.apps import App
+
+    monkeypatch.setattr(
+        "launcher.apps.search",
+        lambda query, limit=8, refresh=False: [App("Zed", ("/usr/bin/zed",), "path")],
+    )
+    panel._show("Launch")
+    panel.launch_query.var.set("zed")
+    panel._refresh_launch()
+    assert [row["kind"] for row in panel.launch_rows] == ["app"]
+
+    launched = []
+    monkeypatch.setattr("launcher.apps.launch", lambda name: launched.append(name) or "launched")
+    panel.launch_list.selection_set(0)
+    panel._launch_selected()
+    _settle(panel)
+    assert launched == ["Zed"]
+
+
+def test_the_launch_page_needs_a_selection(panel):
+    panel._show("Launch")
+    panel.launch_query.var.set("nothing matches this at all")
+    panel._refresh_launch()
+    panel.launch_list.selection_clear(0, "end")
+    panel._launch_selected()
+    assert "Nothing selected" in panel.status.cget("text")
 
 
 def test_the_console_only_ever_draws_from_the_ui_thread(panel):
@@ -188,7 +239,134 @@ def test_a_second_action_is_refused_while_one_is_running(panel):
     assert "still running" in _console(panel) or "still running" in "".join(_drain_queue(panel))
 
 
+# ── the new-profile wizard ───────────────────────────────────────────────
+
+
+def test_the_wizard_creates_a_runnable_profile(gui, monkeypatch, profiles_dir):
+    from launcher.editor import _Wizard
+
+    monkeypatch.setattr("launcher.scaffold._resolve_app", lambda name: ("/usr/bin/code", []))
+    wizard = gui.build(_Wizard)
+    try:
+        wizard.root.update()
+        wizard.fields["name"].var.set("Desk")
+        wizard.app_query.var.set("code")
+        wizard._add_app()
+        wizard.urls.insert("1.0", "https://example.com\n")
+        wizard._create(edit=False)  # destroys the window on success
+    finally:
+        _forget(wizard)
+
+    from launcher.config import find_profile
+
+    profile = find_profile("Desk")
+    assert profile is not None
+    assert [step.type for step in profile.steps] == ["app", "url"]
+    assert wizard.result == profiles_dir / "desk.yaml"
+
+
+def test_a_preset_fills_the_form_but_keeps_a_typed_name(gui):
+    from launcher import scaffold
+    from launcher.editor import _Wizard
+
+    wizard = gui.build(_Wizard)
+    try:
+        wizard.root.update()
+        wizard.fields["name"].var.set("My Setup")
+        wizard._apply_preset(scaffold.preset("focus"))
+        assert wizard.fields["name"].var.get() == "My Setup"
+        assert wizard.fields["description"].var.get() == scaffold.preset("focus").description
+        assert "slack" in wizard.close.var.get()
+    finally:
+        wizard.root.destroy()
+
+
+def test_the_wizard_refuses_a_nameless_profile(gui):
+    from launcher.editor import _Wizard
+
+    wizard = gui.build(_Wizard)
+    try:
+        wizard.root.update()
+        wizard._create(edit=False)
+        assert "needs a name" in wizard.error.cget("text")
+        assert wizard.result is None
+    finally:
+        wizard.root.destroy()
+
+
+# ── the profile editor ───────────────────────────────────────────────────
+
+
+def test_opening_and_saving_a_step_does_not_disable_it(gui, write_profile):
+    """`enabled` defaults to true and is usually absent from the file, so an
+    unticked box plus a save is how a step silently turns itself off."""
+    from launcher.editor import _Editor
+
+    path = write_profile("dev", "name: Dev\nsteps:\n  - {type: url, url: 'https://x.test'}\n")
+    editor = gui.build(_Editor, path)
+    try:
+        editor.root.update()
+        assert editor.widgets["enabled"][0].var.get() is True
+        editor._save()
+    finally:
+        editor.root.destroy()
+
+    from launcher.config import load_profile
+
+    assert load_profile(path).steps[0].enabled is True
+    assert "enabled" not in path.read_text(encoding="utf-8")
+
+
+def test_the_editor_offers_the_rsync_step(gui, write_profile):
+    from launcher.editor import _Editor
+
+    path = write_profile(
+        "backup", "name: B\nsteps:\n  - {type: rsync, src: /a, dest: /b, delete: true}\n"
+    )
+    editor = gui.build(_Editor, path)
+    try:
+        editor.root.update()
+        assert editor.widgets["src"][0].var.get() == "/a"
+        assert editor.widgets["delete"][0].var.get() is True
+    finally:
+        editor.root.destroy()
+
+
+def _forget(window) -> None:
+    """Destroy a window unless it already destroyed itself."""
+    try:
+        window.root.destroy()
+    except Exception:
+        pass
+
+
 # ── the HUD's Settings row ───────────────────────────────────────────────
+
+
+def test_the_hud_launches_a_matching_application(gui, monkeypatch):
+    from launcher.apps import App
+    from launcher.hud import _Hud
+
+    monkeypatch.setattr(
+        "launcher.apps.search",
+        lambda query, limit=6: [App("Zed", ("/usr/bin/zed",), "path", comment="editor")],
+    )
+    launched = []
+    monkeypatch.setattr(
+        "launcher.apps.launch", lambda app: launched.append(app.name) or "launched Zed"
+    )
+    hud = gui.build(_Hud, [], execute=True)
+    try:
+        hud.root.update()
+        hud.query.set("zed")
+        hud.root.update()
+        assert [(row.kind, row.name) for row in hud.filtered][-1] == ("app", "Zed")
+
+        hud.index = len(hud.filtered) - 1
+        hud._commit()  # launching one app closes the launcher
+        assert launched == ["Zed"]
+    finally:
+        _forget(hud)
 
 
 def test_the_hud_offers_settings_below_the_profiles(gui, write_profile):
@@ -214,7 +392,8 @@ def test_searching_for_settings_puts_it_first(gui, write_profile):
         hud.root.update()
         hud.query.set("sett")
         hud.root.update()
-        assert [entry.name for entry in hud.filtered] == ["Settings"]
+        assert hud.filtered[0].name == "Settings"
+        assert "Dev" not in [entry.name for entry in hud.filtered]
     finally:
         hud.root.destroy()
 

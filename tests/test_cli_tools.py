@@ -34,7 +34,7 @@ steps:
     )
     assert main(["list", "--triggers"]) == 0
     out = capsys.readouterr().out
-    assert "★" in out and "Dev" in out
+    assert "* Dev" in out  # the default profile is marked, without a glyph
     assert "hotkey: <ctrl>+<alt>+d" in out
     assert "daily at 09:00" in out
 
@@ -44,7 +44,7 @@ def test_validate_flags_a_broken_profile(write_profile, capsys):
     write_profile("bad", "name: Bad\nsteps:\n  - {type: app}\n")
     assert main(["validate"]) == 1
     out = capsys.readouterr().out
-    assert "✓ ok.yaml" in out and "✗ bad.yaml" in out
+    assert "valid    ok.yaml" in out and "invalid  bad.yaml" in out
     assert "1/2 profiles valid" in out
 
 
@@ -346,14 +346,14 @@ def test_settings_opens_the_panel(monkeypatch):
     opened = []
     monkeypatch.setitem(sys.modules, "launcher.panel", _FakePanel(opened))
     assert main(["settings"]) == 0
-    assert opened == ["Settings"]
+    assert opened == ["Launch"]
 
 
 def test_settings_can_open_a_named_section(monkeypatch):
     opened = []
     monkeypatch.setitem(sys.modules, "launcher.panel", _FakePanel(opened))
-    assert main(["settings", "History"]) == 0
-    assert opened == ["History"]
+    assert main(["settings", "Activity"]) == 0
+    assert opened == ["Activity"]
 
 
 def test_settings_rejects_an_unknown_section():
@@ -365,7 +365,7 @@ def test_config_gui_opens_the_panel(monkeypatch):
     opened = []
     monkeypatch.setitem(sys.modules, "launcher.panel", _FakePanel(opened))
     assert main(["config", "gui"]) == 0
-    assert opened == ["Settings"]
+    assert opened == ["Launch"]
 
 
 def test_settings_explains_a_missing_tkinter(monkeypatch, capsys):
