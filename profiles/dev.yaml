@@ -2,7 +2,6 @@
 # Fields written as {windows, linux, darwin} are picked per-platform at runtime.
 name: Dev
 description: Spin up the full dev environment (Docker, IDE, repos, dashboards)
-icon: "🛠"
 tags: [code, ide, docker]
 default: true
 hotkey: "<ctrl>+<alt>+d"

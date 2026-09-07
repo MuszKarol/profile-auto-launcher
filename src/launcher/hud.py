@@ -49,7 +49,6 @@ class Action:
     name: str
     description: str
     run: Callable[[], None]
-    icon: str = "⚙"
     hint: str = ""
     tags: list[str] = field(default_factory=list)
     steps: tuple = ()
@@ -64,7 +63,6 @@ class Row:
     kind: str  # profile | app | action
     name: str
     description: str
-    icon: str
     tail: str
     payload: Any
     badge: tuple[str, str] | None = None
@@ -260,7 +258,7 @@ class _Hud:
 
         self.footer = kit.label(
             self.outer,
-            "↑↓ move    ⏎ run    → preview    ^E edit    ^K stop    ^, manager    esc close",
+            "↑↓ move     ⏎ run     → preview     ^E edit     ^K stop     ^, manager     esc close",
             fg=pal.faint,
             size=SIZE_TINY,
         )
@@ -312,17 +310,18 @@ class _Hud:
         rows = []
         for _rank, profile in scored:
             if profile.name in self.active:
-                badge = ("● running", self.pal.ok)
+                badge = ("running", self.pal.fg)
             elif profile.name == self.last_profile:
-                badge = ("↺ recent", self.pal.accent)
+                badge = ("recent", self.pal.muted)
+            elif profile.default:
+                badge = ("default", self.pal.faint)
             else:
                 badge = None
             rows.append(
                 Row(
                     kind="profile",
-                    name=profile.name + ("  ★" if profile.default else ""),
+                    name=profile.name,
                     description=profile.description,
-                    icon=profile.icon or "▣",
                     tail=f"{len(profile.steps)} steps",
                     payload=profile,
                     badge=badge,
@@ -349,7 +348,6 @@ class _Hud:
                 kind="app",
                 name=app.name,
                 description=apps.describe(app),
-                icon="▷",
                 tail="launch",
                 payload=app,
             )
@@ -375,9 +373,7 @@ class _Hud:
         scored_actions = [(action, _match(query, action)) for action in self.actions]
         exact = [a for a, rank in scored_actions if rank is not None and rank >= fuzzy.WORD_START]
         rest = [a for a, rank in scored_actions if rank is not None and a not in exact]
-        action_rows = [
-            Row("action", a.name, a.description, a.icon, a.hint, a) for a in [*exact, *rest]
-        ]
+        action_rows = [Row("action", a.name, a.description, a.hint, a) for a in [*exact, *rest]]
         exact_rows, weak_rows = action_rows[: len(exact)], action_rows[len(exact) :]
         taken = {row.name.lower() for row in profile_rows}
         # Order of intent: an action the query named, the profiles, a single
@@ -439,10 +435,6 @@ class _Hud:
         bar = tk.Frame(row, bg=pal.panel, width=3)
         bar.pack(side="left", fill="y", padx=(0, theme.METRICS.gap_sm))
         row.accent_bar = bar  # type: ignore[attr-defined]
-
-        kit.label(row, entry.icon, bg=pal.panel, fg=pal.accent, size=SIZE_BODY).pack(
-            side="left", padx=(0, theme.METRICS.gap_sm)
-        )
 
         text = tk.Frame(row, bg=pal.panel)
         text.pack(side="left", fill="x", expand=True)
@@ -558,18 +550,12 @@ class _Hud:
         for step in shown:
             line = tk.Frame(self.preview_frame, bg=pal.panel)
             line.pack(fill="x", pady=1)
-            glyph = "○" if not step.enabled else ("⇉" if step.parallel else "→")
+            note = "" if step.enabled else "  (off)"
+            if step.enabled and step.parallel:
+                note = "  (parallel)"
             kit.label(
                 line,
-                glyph,
-                bg=pal.panel,
-                fg=pal.faint if not step.enabled else pal.accent,
-                size=SIZE_TINY,
-                width=2,
-            ).pack(side="left")
-            kit.label(
-                line,
-                describe_step(step)[:64],
+                describe_step(step)[:60] + note,
                 bg=pal.panel,
                 fg=pal.faint if not step.enabled else pal.fg,
                 size=SIZE_TINY,
@@ -700,10 +686,8 @@ class _Hud:
 
         header = kit.frame(self.outer)
         header.pack(fill="x")
-        kit.label(header, profile.icon or "▣", fg=pal.accent, size=SIZE_DISPLAY).pack(
-            side="left", padx=(0, theme.METRICS.gap_sm)
-        )
-        kit.label(header, f"{verb} {profile.name}…", size=SIZE_DISPLAY, bold=True).pack(side="left")
+        kit.brand(header, 20).pack(side="left", padx=(0, theme.METRICS.gap_sm))
+        kit.label(header, f"{verb} {profile.name}", size=SIZE_DISPLAY, bold=True).pack(side="left")
 
         kit.divider(self.outer, pady=(theme.METRICS.gap, theme.METRICS.gap))
 
@@ -752,13 +736,21 @@ class _Hud:
         row = kit.frame(self.progress_frame)
         row.pack(fill="x", pady=2)
         if result.skipped:
-            glyph, colour = "○", pal.faint
+            status, tone, weight = "skipped", pal.faint, False
         elif result.ok:
-            glyph, colour = "✓", pal.ok
+            status, tone, weight = "done", pal.muted, False
         else:
-            glyph, colour = "✗", pal.err
-        kit.label(row, glyph, fg=colour, size=SIZE_BODY, bold=True, width=2).pack(side="left")
-        kit.label(row, result.step.label, size=SIZE_SMALL, anchor="w").pack(side="left")
+            status, tone, weight = "failed", pal.err, True
+        kit.label(row, status, fg=tone, size=SIZE_TINY, bold=weight, width=8, anchor="w").pack(
+            side="left"
+        )
+        kit.label(
+            row,
+            result.step.label,
+            fg=pal.faint if result.skipped else pal.fg,
+            size=SIZE_SMALL,
+            anchor="w",
+        ).pack(side="left")
         detail_fg = pal.err if (not result.ok and not result.step.optional) else pal.faint
         kit.label(row, result.detail[:90], fg=detail_fg, size=SIZE_TINY, anchor="e").pack(
             side="right"
@@ -766,12 +758,12 @@ class _Hud:
 
     def _finish(self) -> None:
         if self.failed_count == 0:
-            self.status.configure(text="✓ all steps finished — closing…", fg=self.pal.ok)
+            self.status.configure(text="All steps finished — closing", fg=self.pal.fg)
             self.exit_code = 0
             self.root.after(1400, self.root.destroy)
         else:
             self.status.configure(
-                text=f"✗ {self.failed_count} step(s) failed — esc to close", fg=self.pal.err
+                text=f"{self.failed_count} step(s) failed — esc to close", fg=self.pal.err
             )
             self.exit_code = 1
 

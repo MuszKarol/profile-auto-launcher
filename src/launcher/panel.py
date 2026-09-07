@@ -20,18 +20,20 @@ import tkinter as tk
 from collections.abc import Callable
 from typing import Any
 
+from launcher import icons, theme, ui
 from launcher import panel_model as model
-from launcher import theme, ui
 from launcher.panel_model import SECTIONS
 from launcher.theme import SIZE_BODY, SIZE_SMALL, SIZE_TINY
 from launcher.ui import Kit
 
-NAV_GLYPHS = {
-    "Launch": "▷",
-    "Profiles": "▣",
-    "Sync": "⇅",
-    "Activity": "◷",
-    "Settings": "⚙",
+# The only icons in the window: one per navigation entry, repeated on that
+# page's header. Rows, buttons and fields carry text alone.
+NAV_ICONS = {
+    "Launch": "play",
+    "Profiles": "layers",
+    "Sync": "sync",
+    "Activity": "activity",
+    "Settings": "sliders",
 }
 
 
@@ -94,22 +96,21 @@ class _Panel:
         kit.brand(brand, 22, bg=pal.panel).pack(side="left", padx=(0, self.m.gap_sm))
         kit.label(brand, "palaunch", bg=pal.panel, size=SIZE_BODY, bold=True).pack(side="left")
 
-        self.nav_buttons: dict[str, tk.Label] = {}
+        self.nav_buttons: dict[str, tuple[tk.Frame, tk.Canvas, tk.Label]] = {}
         for name in SECTIONS:
-            item = tk.Label(
-                nav,
-                text=f"  {NAV_GLYPHS.get(name, '·')}   {name}",
-                bg=pal.panel,
-                fg=pal.muted,
-                font=kit.f(SIZE_SMALL, bold=True),
-                anchor="w",
-                padx=self.m.gap_sm,
-                pady=9,
-                cursor="hand2",
-            )
+            item = tk.Frame(nav, bg=pal.panel, padx=self.m.gap_sm, pady=8, cursor="hand2")
             item.pack(fill="x", pady=1)
-            item.bind("<Button-1>", lambda _e, n=name: self._show(n))
-            self.nav_buttons[name] = item
+            glyph = kit.icon(item, NAV_ICONS.get(name, ""), 17, pal.muted, pal.panel)
+            glyph.pack(side="left", padx=(2, self.m.gap_sm))
+            label = kit.label(
+                item, name, bg=pal.panel, fg=pal.muted, size=SIZE_SMALL, bold=True, anchor="w"
+            )
+            label.pack(side="left")
+            for widget in (item, glyph, label):
+                widget.bind("<Button-1>", lambda _e, n=name: self._show(n))
+                widget.bind("<Enter>", lambda _e, n=name: self._hover_nav(n, True))
+                widget.bind("<Leave>", lambda _e, n=name: self._hover_nav(n, False))
+            self.nav_buttons[name] = (item, glyph, label)
 
         footer = tk.Frame(nav, bg=pal.panel)
         footer.pack(side="bottom", fill="x")
@@ -123,14 +124,26 @@ class _Panel:
         self.content = tk.Frame(body, bg=pal.bg, padx=self.m.gap_xl, pady=self.m.gap_lg)
         self.content.pack(side="left", fill="both", expand=True)
 
+    def _hover_nav(self, name: str, entered: bool) -> None:
+        """Lift an unselected entry on hover. The selected one never moves."""
+        if name == self.section:
+            return
+        item, glyph, label = self.nav_buttons[name]
+        ground = self.pal.panel_hover if entered else self.pal.panel
+        ink = self.pal.fg if entered else self.pal.muted
+        item.configure(bg=ground)
+        label.configure(bg=ground, fg=ink)
+        icons.recolour(glyph, ink, ground)
+
     def _show(self, name: str) -> None:
         self.section = name
-        for key, item in self.nav_buttons.items():
+        for key, (item, glyph, label) in self.nav_buttons.items():
             selected = key == name
-            item.configure(
-                bg=self.pal.panel_selected if selected else self.pal.panel,
-                fg=self.pal.fg if selected else self.pal.muted,
-            )
+            ground = self.pal.panel_selected if selected else self.pal.panel
+            ink = self.pal.fg if selected else self.pal.muted
+            item.configure(bg=ground)
+            label.configure(bg=ground, fg=ink)
+            icons.recolour(glyph, ink, ground)
         for child in self.content.winfo_children():
             child.destroy()
         for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
@@ -202,13 +215,13 @@ class _Panel:
             try:
                 result = job()
             except Exception as exc:  # surfaced, never a traceback in the user's face
-                self.log(f"✗ {label}: {exc}")
-                self.finished.put((f"✗ {label} failed", self.pal.err, then))
+                self.log(f"FAILED  {label}: {exc}")
+                self.finished.put((f"{label} failed", self.pal.err, then))
                 return
             if result:
                 for line in str(result).splitlines():
                     self.log(line)
-            self.finished.put((f"✓ {label}", self.pal.ok, then))
+            self.finished.put((f"{label} finished", self.pal.ok, then))
 
         threading.Thread(target=worker, daemon=True, name="pal-panel").start()
 
@@ -225,6 +238,7 @@ class _Panel:
             self.content,
             "Launch",
             "Type a profile name to run the whole context, or an app name to open just that one.",
+            icon=NAV_ICONS["Launch"],
         )
 
         search = kit.frame(self.content)
@@ -257,9 +271,9 @@ class _Panel:
         self.launch_rows = model.launch_rows(query)
         self.launch_list.delete(0, "end")
         for row in self.launch_rows:
-            marker = "▶" if row["kind"] == "profile" else "▷"
+            kind = "profile" if row["kind"] == "profile" else "app"
             self.launch_list.insert(
-                "end", f" {marker}  {row['name'][:28]:<28} {row['detail'][:60]}"
+                "end", f"  {kind:<8} {row['name'][:26]:<26} {row['detail'][:58]}"
             )
         if self.launch_rows:
             self.launch_list.selection_set(0)
@@ -334,7 +348,7 @@ class _Panel:
                 else:
                     _results, stopped, _stubborn = stop_profile(profile)
                 closed += stopped
-                self.log(f"■ stopped {name}")
+                self.log(f"stopped {name}")
             return f"{closed} process(es) closed"
 
         self._work("Stop everything", job, self._refresh_launch)
@@ -343,7 +357,10 @@ class _Panel:
     def _build_profiles(self) -> None:
         kit = self.kit
         kit.heading(
-            self.content, "Profiles", "Everything `palaunch list / run / stop / edit` does."
+            self.content,
+            "Profiles",
+            "Everything `palaunch list / run / stop / edit` does.",
+            icon=NAV_ICONS["Profiles"],
         )
         self.profile_list = kit.listbox(self.content, height=13)
         self.profile_list.pack(fill="both", expand=True)
@@ -370,18 +387,18 @@ class _Panel:
         self.profile_rows = model.profile_rows()
         self.profile_list.delete(0, "end")
         for row in self.profile_rows:
-            marker = "★" if row["default"] else " "
-            running = f"  ● {row['running']} running" if row["running"] else ""
+            marker = "default" if row["default"] else ""
+            running = f"  {row['running']} running" if row["running"] else ""
             hotkey = f"  [{row['hotkey']}]" if row["hotkey"] else ""
             self.profile_list.insert(
                 "end",
-                f"{marker} {row['name']:<18} {row['steps']:>2} steps  "
-                f"{row['description'][:38]:<38}{hotkey}{running}",
+                f"  {row['name']:<18} {row['steps']:>2} steps  "
+                f"{row['description'][:34]:<34}{marker:<8}{hotkey}{running}",
             )
         if self.profile_rows:
             self.profile_list.selection_set(0)
         else:
-            self.profile_list.insert("end", "  no profiles yet — press “New…”")
+            self.profile_list.insert("end", "  no profiles yet — press New")
 
     def _selected_profile(self) -> dict[str, Any] | None:
         selection = self.profile_list.curselection()
@@ -460,7 +477,7 @@ class _Panel:
                     procs.stop_profile(other)
                 else:
                     stop_profile(running)
-                self.log(f"■ stopped {other}")
+                self.log(f"stopped {other}")
             profile = find_profile(name)
             if profile is None:
                 raise RuntimeError(f"profile '{name}' disappeared")
@@ -513,7 +530,7 @@ class _Panel:
             from launcher import record
             from launcher.config import profiles_dir
 
-            self.log(f"● recording for {seconds}s — open the apps you want in '{name}'")
+            self.log(f"recording for {seconds}s — open the apps you want in '{name}'")
             candidates = record.observe(
                 duration=float(seconds),
                 on_tick=lambda remaining, found: None,
@@ -539,9 +556,9 @@ class _Panel:
                     profile = load_profile(path)
                 except Exception as exc:
                     errors += 1
-                    self.log(f" ✗ {path.name}: {exc}")
+                    self.log(f"  invalid  {path.name}: {exc}")
                     continue
-                self.log(f" ✓ {path.name}: '{profile.name}' — {len(profile.steps)} steps")
+                self.log(f"  valid    {path.name}: '{profile.name}' — {len(profile.steps)} steps")
             return f"{len(paths) - errors}/{len(paths)} profiles valid"
 
         self._work("Validate profiles", job)
@@ -558,6 +575,7 @@ class _Panel:
             self.content,
             "Sync",
             "Two ways to carry the profiles directory between machines.",
+            icon=NAV_ICONS["Sync"],
         )
 
         git_card = kit.card(self.content)
@@ -684,7 +702,12 @@ class _Panel:
     # ── Activity ─────────────────────────────────────────────────────────
     def _build_activity(self) -> None:
         kit = self.kit
-        kit.heading(self.content, "Activity", "What ran, how long it took, and what the log says.")
+        kit.heading(
+            self.content,
+            "Activity",
+            "What ran, how long it took, and what the log says.",
+            icon=NAV_ICONS["Activity"],
+        )
         controls = kit.frame(self.content)
         controls.pack(fill="x", pady=(0, self.m.gap_sm))
         self.activity_view = tk.StringVar(value="runs")
@@ -746,6 +769,7 @@ class _Panel:
             self.content,
             "Settings",
             "Written to settings.yaml — the same keys `palaunch config set` writes.",
+            icon=NAV_ICONS["Settings"],
         )
         overridden = model.env_overrides()
         values = model.current_values()

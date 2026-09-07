@@ -1,12 +1,18 @@
 """Design tokens for the Tk surfaces: colours, fonts, spacing and radii.
 
-Dark is the default and the palette the UI was designed against; `light` is a
-tuned counterpart, and `auto` follows the desktop preference. Everything the
-windows draw comes from here, so a colour is changed in one place.
+The palette is monochrome by design. There is one accent — pure white — and
+everything else is a step of grey between the window ground and the text on
+it, so hierarchy comes from contrast, weight and space rather than from hue.
+Dark is the default; `light` is the same system inverted, and `auto` follows
+the desktop preference.
+
+Because there is no colour to spend on meaning, status is carried by weight
+and tone: a failure is pure white and bold, ordinary success is body text, and
+anything skipped or inactive drops to the muted grey.
 
 The font family matters more than it looks: a hard-coded "Segoe UI" does not
-exist outside Windows, so Tk silently substitutes something else. `ui_font()`
-picks the first family the running Tk actually has.
+exist outside Windows, so Tk silently substitutes something else.
+`font_family()` picks the first family the running Tk actually has.
 """
 
 from __future__ import annotations
@@ -46,46 +52,48 @@ class Palette:
 
 DARK = Palette(
     name="dark",
-    bg="#0b0e14",
-    panel="#141926",
-    panel_hover="#1a2130",
-    panel_selected="#212a3d",
-    elevated="#171d2b",
-    fg="#e9edf6",
-    muted="#94a0b8",
-    faint="#5f6b83",
-    accent="#6d8cff",
-    accent_hover="#8aa2ff",
-    on_accent="#08101f",
-    border="#232b3d",
-    ok="#5ee9a4",
-    err="#ff7b8a",
-    warn="#f7c65c",
-    field_bg="#0e131d",
-    field_border="#2a3348",
-    shadow="#05070c",
+    bg="#09090b",  # window ground
+    panel="#161618",  # cards and the side nav
+    panel_hover="#1c1c1e",  # inputs, buttons, anything interactive
+    panel_selected="#27272a",  # the row or tab you are on
+    elevated="#121212",  # dialogs and popovers
+    fg="#f4f4f5",
+    muted="#a1a1aa",
+    faint="#71717a",  # captions and section labels
+    accent="#ffffff",
+    accent_hover="#e4e4e7",
+    on_accent="#000000",
+    border="#27272a",
+    # No semantic hues: a failure is the brightest thing on screen, ordinary
+    # success is body text, and anything skipped fades into the secondary tone.
+    ok="#f4f4f5",
+    err="#ffffff",
+    warn="#a1a1aa",
+    field_bg="#1c1c1e",
+    field_border="#27272a",
+    shadow="#000000",
 )
 
 LIGHT = Palette(
     name="light",
-    bg="#f7f8fb",
-    panel="#ffffff",
-    panel_hover="#eef1f8",
-    panel_selected="#e3e9fb",
+    bg="#ffffff",
+    panel="#fafafa",
+    panel_hover="#f4f4f5",
+    panel_selected="#e4e4e7",
     elevated="#ffffff",
-    fg="#141926",
-    muted="#5a6478",
-    faint="#8792a8",
-    accent="#3f5bd9",
-    accent_hover="#3049c4",
+    fg="#09090b",
+    muted="#52525b",
+    faint="#71717a",
+    accent="#09090b",
+    accent_hover="#27272a",
     on_accent="#ffffff",
-    border="#dde2ee",
-    ok="#0f8a4f",
-    err="#c22f45",
-    warn="#8a6112",
+    border="#e4e4e7",
+    ok="#09090b",
+    err="#000000",
+    warn="#52525b",
     field_bg="#ffffff",
-    field_border="#ccd4e6",
-    shadow="#c9cfdd",
+    field_border="#d4d4d8",
+    shadow="#d4d4d8",
 )
 
 
@@ -114,8 +122,8 @@ SIZE_SMALL = 9
 SIZE_TINY = 8
 
 _UI_FAMILIES = {
-    "windows": ("Segoe UI Variable Text", "Segoe UI", "Tahoma"),
-    "darwin": ("SF Pro Text", "Helvetica Neue", "Lucida Grande"),
+    "windows": ("Segoe UI Variable Text", "Segoe UI", "Inter", "Tahoma"),
+    "darwin": ("SF Pro Text", "Inter", "Helvetica Neue", "Lucida Grande"),
     "linux": ("Inter", "Cantarell", "Ubuntu", "Noto Sans", "DejaVu Sans"),
 }
 

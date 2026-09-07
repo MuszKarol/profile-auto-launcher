@@ -1,6 +1,5 @@
 name: Gaming
 description: Close work apps, fire up Steam and Discord
-icon: "🎮"
 tags: [steam, discord, fun]
 
 steps:

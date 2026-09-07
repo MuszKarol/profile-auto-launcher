@@ -30,32 +30,28 @@ class Preset:
 
     key: str
     title: str
-    icon: str
     description: str
     tags: tuple[str, ...] = ()
     close: tuple[str, ...] = ()
 
 
 PRESETS: tuple[Preset, ...] = (
-    Preset("blank", "Blank", "▣", "Start from nothing"),
+    Preset("blank", "Blank", "Start from nothing"),
     Preset(
         "dev",
         "Development",
-        "🛠",
         "Editor, terminal and the services a project needs",
         tags=("code", "work"),
     ),
     Preset(
         "work",
         "Work",
-        "💼",
         "Mail, calendar, chat and the documents of the day",
         tags=("office", "work"),
     ),
     Preset(
         "focus",
         "Focus",
-        "🎯",
         "Close the distractions, open only what the task needs",
         tags=("focus",),
         close=("slack", "discord", "telegram"),
@@ -63,7 +59,6 @@ PRESETS: tuple[Preset, ...] = (
     Preset(
         "gaming",
         "Gaming",
-        "🎮",
         "Launcher up, background noise down",
         tags=("play",),
         close=("teams", "outlook"),
@@ -81,7 +76,6 @@ class Draft:
 
     name: str
     description: str = ""
-    icon: str = ""
     tags: list[str] = field(default_factory=list)
     hotkey: str = ""
     apps: list[str] = field(default_factory=list)  # app names or executable paths
@@ -150,8 +144,6 @@ def build(draft: Draft) -> dict[str, Any]:
     profile: dict[str, Any] = {"name": draft.name.strip()}
     if draft.description.strip():
         profile["description"] = draft.description.strip()
-    if draft.icon.strip():
-        profile["icon"] = draft.icon.strip()
     tags = [tag.strip() for tag in draft.tags if tag.strip()]
     if tags:
         profile["tags"] = tags
@@ -196,7 +188,6 @@ STARTER = """\
 {modeline}
 name: {name}
 description: Describe what this profile sets up
-icon: "\\U0001F680"
 
 # vars are available as {{{{ vars.NAME }}}} anywhere below
 vars:

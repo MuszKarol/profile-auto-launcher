@@ -6,6 +6,28 @@ All notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **The interface is monochrome.** Deep black ground (`#09090b`), cards a step
+  above it, white as the only accent — primary buttons are solid white with
+  black text — and two text tones over it. There are no semantic colours left,
+  so status is carried by weight and tone instead: a failure is the brightest
+  text on screen, ordinary success is body text, and anything skipped or
+  inactive drops to grey. The light palette is the same system inverted.
+- **Icons only where they mean something.** `launcher.icons` draws a small
+  outline set on a 24-unit grid — one per navigation entry, repeated on that
+  tool's header, and nothing else. Rows, buttons and fields carry text alone.
+  They are strokes on a canvas rather than an icon font, so they take the
+  palette's colour and look the same on Windows, macOS and Linux.
+- **No emoji, anywhere.** The wizard's presets, the sample profiles, the
+  recorder's output, the tray menu, the launcher's rows and every status line
+  are plain text: "running", "default", "failed", "skipped". A profile's
+  `icon:` key is still accepted so older files keep loading, but nothing draws
+  it. `tests/test_design.py` fails the build if a hue, a decorative glyph or an
+  emoji comes back.
+- The application mark is the window ground with the one accent on it: a black
+  rounded square holding a white prompt.
+
 ## [1.0.0] — 2026-09-07
 
 The interface release: one dark theme across every window, a launcher that

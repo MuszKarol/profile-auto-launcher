@@ -77,7 +77,7 @@ def run_tray(
         threading.Thread(target=target, args=args, daemon=True).start()
 
     def label(profile: Profile) -> str:
-        return f"{profile.icon} {profile.name}" if profile.icon else profile.name
+        return profile.name
 
     def open_settings() -> None:
         if on_settings is not None:
@@ -115,7 +115,7 @@ def run_tray(
             by_name = {p.name: p for p in current}
             stop_items = [
                 pystray.MenuItem(
-                    f"{name} ({len(running)} proc)",
+                    f"{name} ({len(running)} running)",
                     (lambda p: lambda _i=None, _it=None: in_thread(on_stop, p))(by_name[name]),
                 )
                 for name, running in active.items()

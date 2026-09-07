@@ -1,6 +1,5 @@
 name: Work
 description: Mail, calendar, chat and the daily board — no IDE
-icon: "💼"
 tags: [meetings, email, chat]
 
 # Starts itself on weekday mornings while the tray is running. `at:` only fires

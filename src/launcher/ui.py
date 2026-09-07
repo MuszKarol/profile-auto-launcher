@@ -2,12 +2,17 @@
 
 Tk's stock widgets look like 1995 and, worse, ignore colours inconsistently
 across platforms: a `tk.Button` on macOS keeps its native grey whatever `bg`
-says. So buttons, chips and tabs here are labels with their own hover states,
-which behave identically on all three platforms and let the palette in
+says. So buttons and tabs here are labels with their own hover states, which
+behave identically on all three platforms and let the palette in
 `launcher.theme` actually decide what the app looks like.
 
+The kit is deliberately short on decoration. There is one accent — white —
+one primary button per view, and icons only where `launcher.icons` is asked
+for them: navigation entries and the header of a tool. Rows, fields and
+buttons carry text alone.
+
 Nothing in here knows about profiles, settings or steps — it is presentation
-only, shared by the launcher HUD, the manager window and the profile editor.
+only, shared by the launcher window, the manager and the profile editor.
 """
 
 from __future__ import annotations
@@ -15,7 +20,7 @@ from __future__ import annotations
 import tkinter as tk
 from collections.abc import Callable, Iterable, Sequence
 
-from launcher import branding, theme
+from launcher import branding, icons, theme
 from launcher.theme import SIZE_BODY, SIZE_SMALL, SIZE_TINY, SIZE_TITLE
 
 BUTTON_KINDS = ("primary", "ghost", "quiet", "danger")
@@ -102,12 +107,20 @@ class Kit:
             **kwargs,
         )
 
-    def heading(self, parent: tk.Misc, text: str, hint: str = "", bg: str | None = None) -> None:
+    def heading(
+        self, parent: tk.Misc, text: str, hint: str = "", bg: str | None = None, icon: str = ""
+    ) -> None:
+        """A tool header: the title, one line about it, and — only here and in
+        the navigation — an icon."""
         ground = bg or self.pal.bg
-        self.label(parent, text, size=SIZE_TITLE, bold=True, bg=ground).pack(anchor="w")
+        top = self.frame(parent, bg=ground)
+        top.pack(fill="x", anchor="w")
+        if icon:
+            self.icon(top, icon, 20, self.pal.fg, ground).pack(side="left", padx=(0, self.m.gap_sm))
+        self.label(top, text, size=SIZE_TITLE, bold=True, bg=ground).pack(side="left")
         if hint:
             self.label(parent, hint, size=SIZE_SMALL, fg=self.pal.muted, bg=ground).pack(
-                anchor="w", pady=(2, self.m.gap)
+                anchor="w", pady=(4, self.m.gap)
             )
         else:
             self.frame(parent, bg=ground, height=self.m.gap).pack()
@@ -373,15 +386,22 @@ class Kit:
         window.configure(bg=self.pal.bg)
         branding.apply_window_icon(window)
 
-    def brand(self, parent: tk.Misc, size: int = 22, bg: str | None = None) -> tk.Label:
-        """The app mark, falling back to a text glyph if the image cannot load."""
+    def icon(
+        self,
+        parent: tk.Misc,
+        name: str,
+        size: int = 18,
+        colour: str | None = None,
+        bg: str | None = None,
+    ) -> tk.Canvas:
+        """One outline icon. Reserved for navigation and tool headers."""
+        return icons.draw(parent, name, size, colour or self.pal.fg, bg or self.pal.bg)
+
+    def brand(self, parent: tk.Misc, size: int = 22, bg: str | None = None) -> tk.Widget:
+        """The app mark: the same terminal prompt the OS icon carries, drawn
+        as a stroke so it sits at the same weight as the rest of the chrome."""
         ground = bg or self.pal.bg
         try:
-            image = branding.photo_image(size, master=parent)
-            widget = tk.Label(parent, image=image, bg=ground)
-            branding.hold(widget, image)
-            return widget
+            return self.icon(parent, "terminal", size, self.pal.fg, ground)
         except Exception:
-            return self.label(
-                parent, "›_", bg=ground, fg=self.pal.accent, size=SIZE_TITLE, bold=True
-            )
+            return self.label(parent, "palaunch", bg=ground, size=SIZE_TITLE, bold=True)
