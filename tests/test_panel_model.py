@@ -41,10 +41,12 @@ def test_choice_fields_offer_their_current_default():
 
 
 def test_panel_sections_match_the_cli_choices():
+    """One list of pages, used by the window and by `palaunch settings`."""
+    assert tuple(PANEL_SECTIONS) == tuple(model.SECTIONS)
     pytest.importorskip("tkinter")
     from launcher.panel import SECTIONS
 
-    assert tuple(PANEL_SECTIONS) == tuple(SECTIONS)
+    assert tuple(SECTIONS) == tuple(model.SECTIONS)
 
 
 # ── coercion ─────────────────────────────────────────────────────────────
@@ -112,13 +114,13 @@ def test_apply_writes_nothing_when_a_value_is_invalid():
 
 def test_apply_leaves_unrelated_keys_in_the_file_alone():
     settings.save({"a_key_we_do_not_know": "keep me"})
-    model.apply({**model.current_values(), "theme": "dark"})
+    model.apply({**model.current_values(), "theme": "light"})
 
     from launcher.config import settings_path
 
     text = settings_path().read_text(encoding="utf-8")
     assert "a_key_we_do_not_know: keep me" in text
-    assert "theme: dark" in text
+    assert "theme: light" in text
 
 
 def test_env_overrides_are_reported(monkeypatch):

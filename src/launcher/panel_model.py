@@ -16,6 +16,20 @@ from typing import Any
 
 from launcher import settings
 
+# The manager's pages, in nav order. The CLI offers the same names, so they
+# live here — importing the panel would drag tkinter into `palaunch --help`.
+SECTIONS = ("Launch", "Profiles", "Sync", "Activity", "Settings")
+
+
+def version() -> str:
+    """The installed package version, or "dev" from a source checkout."""
+    import importlib.metadata as metadata
+
+    try:
+        return metadata.version("profile-auto-launcher")
+    except metadata.PackageNotFoundError:
+        return "dev"
+
 
 @dataclass(frozen=True)
 class Field:
@@ -44,8 +58,8 @@ GROUPS: tuple[Group, ...] = (
                 "theme",
                 "Theme",
                 "choice",
-                "Colours for the HUD, editor and this panel.",
-                choices=("auto", "dark", "light"),
+                "Dark, light, or follow the desktop.",
+                choices=("dark", "light", "auto"),
             ),
             Field("hud_width", "HUD width (px)", "int", minimum=420, maximum=3000),
             Field("hud_height", "HUD height (px)", "int", minimum=300, maximum=3000),
@@ -113,7 +127,13 @@ GROUPS: tuple[Group, ...] = (
                 "sync_remote",
                 "Git remote for profiles",
                 "str",
-                "Used by `palaunch sync` and the Sync tab.",
+                "Used by `palaunch sync` and the Sync page.",
+            ),
+            Field(
+                "sync_mirror",
+                "rsync mirror target",
+                "str",
+                "A folder, a drive or user@host:/path for `palaunch sync --mirror`.",
             ),
         ),
     ),
@@ -319,3 +339,47 @@ def open_path(path: Any) -> str:
     else:
         subprocess.run(["xdg-open", target], check=False)
     return f"opened {target}"
+
+
+def launch_rows(query: str = "", limit: int = 40) -> list[dict[str, Any]]:
+    """Profiles and applications matching `query`, profiles first.
+
+    The Launch page and the HUD answer the same question; this is the answer
+    without a widget attached, so it can be tested.
+    """
+    from launcher import apps, fuzzy
+    from launcher.config import discover_profiles
+
+    query = query.strip()
+    rows: list[dict[str, Any]] = []
+    for profile in discover_profiles():
+        rank = fuzzy.best(query, [profile.name, profile.description, *profile.tags])
+        if rank is None:
+            continue
+        rows.append(
+            {
+                "kind": "profile",
+                "name": profile.name,
+                "detail": profile.description or f"{len(profile.steps)} steps",
+                "rank": rank,
+            }
+        )
+    rows.sort(key=lambda row: (-row["rank"], row["name"].lower()))
+    if query:
+        taken = {row["name"].lower() for row in rows}
+        for app in apps.search(query, limit=limit):
+            if app.name.lower() in taken:
+                continue
+            rows.append({"kind": "app", "name": app.name, "detail": apps.describe(app), "rank": 0})
+    return rows[:limit]
+
+
+def running_rows() -> list[str]:
+    """One short label per running profile — what the Launch page shows."""
+    from launcher import procs
+
+    try:
+        active = procs.active_profiles()
+    except Exception:
+        return []
+    return [f"● {name} ({len(running)})" for name, running in sorted(active.items())]

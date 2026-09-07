@@ -178,7 +178,7 @@ def test_a_zombie_child_does_not_count_as_alive():
 def test_settings_defaults_apply_without_a_file():
     conf = settings.load()
     assert conf.hotkey == "<alt>+<space>"
-    assert conf.theme == "auto"
+    assert conf.theme == "dark"
 
 
 def test_settings_are_read_from_the_file():
@@ -209,4 +209,4 @@ def test_malformed_settings_file_falls_back_to_defaults():
     from launcher.config import settings_path
 
     settings_path().write_text("this: [is not: valid", encoding="utf-8")
-    assert settings.reload().theme == "auto"
+    assert settings.reload().theme == "dark"
