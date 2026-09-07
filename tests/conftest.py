@@ -59,27 +59,60 @@ class _Gui:
     still explodes. Windows CI runners ship a Python whose Tcl/Tk data files
     are missing and do exactly that. So there is one attempt per window, and
     it is the real one.
+
+    Windows are built as children of one session-wide root. Tk dislikes being
+    asked for a second root, and macOS dislikes it enough to take the whole
+    interpreter down with a bus error partway through the suite — which is
+    exactly what a test file full of windows used to do.
     """
 
-    def __init__(self, tk) -> None:
+    def __init__(self, tk, root) -> None:
         self.tk = tk
+        self.root = root
         self.TclError = tk.TclError
 
     def build(self, factory, *args, **kwargs):
+        if "parent" not in kwargs and self._accepts_parent(factory):
+            kwargs["parent"] = self.root
         try:
             return factory(*args, **kwargs)
         except self.tk.TclError as exc:  # no display, or a broken Tcl/Tk
             pytest.skip(f"Tk cannot open a window here: {exc}")
 
+    @staticmethod
+    def _accepts_parent(factory) -> bool:
+        import inspect
+
+        try:
+            return "parent" in inspect.signature(factory).parameters
+        except (TypeError, ValueError):
+            return False
+
+
+@pytest.fixture(scope="session")
+def tk_root():
+    """One Tk root for the whole session; every window hangs off it."""
+    tk = pytest.importorskip("tkinter")
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:
+        pytest.skip(f"Tk cannot open a window here: {exc}")
+    root.withdraw()
+    yield root
+    try:
+        root.destroy()
+    except tk.TclError:
+        pass
+
 
 @pytest.fixture
-def gui():
+def gui(tk_root):
     """Window builder, or a skip when tkinter is not installed at all.
 
     CI runs the Linux jobs under Xvfb so these tests actually execute there;
     everywhere else they skip instead of erroring.
     """
-    return _Gui(pytest.importorskip("tkinter"))
+    return _Gui(pytest.importorskip("tkinter"), tk_root)
 
 
 @pytest.fixture

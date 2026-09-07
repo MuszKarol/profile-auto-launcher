@@ -21,7 +21,7 @@ from collections.abc import Callable
 from typing import Any
 
 from launcher import panel_model as model
-from launcher import theme
+from launcher import theme, ui
 from launcher.panel_model import SECTIONS
 from launcher.theme import SIZE_BODY, SIZE_SMALL, SIZE_TINY
 from launcher.ui import Kit
@@ -36,7 +36,7 @@ NAV_GLYPHS = {
 
 
 class _Panel:
-    def __init__(self) -> None:
+    def __init__(self, parent: tk.Misc | None = None) -> None:
         self.kit = Kit()
         self.pal = self.kit.pal
         self.font = self.kit.font
@@ -48,7 +48,8 @@ class _Panel:
         self.section = SECTIONS[0]
         self.busy = False
 
-        self.root = tk.Tk()
+        self.parent = parent
+        self.root = ui.new_window(parent)
         self.kit.chrome(self.root, "Profile Auto Launcher")
         self.root.geometry("1040x720")
         self.root.minsize(880, 600)
@@ -144,13 +145,12 @@ class _Panel:
         }[name]()
 
     def _open_launcher(self) -> None:
-        """The HUD, from the manager — a second Tk root would fight this one,
-        so it opens in the same process only after this window closes."""
-        self.root.destroy()
+        """Open the launcher as a child of this window, so the process keeps
+        the one Tk root it already has."""
         from launcher.config import discover_profiles
         from launcher.hud import pick_and_run
 
-        pick_and_run(discover_profiles())
+        pick_and_run(discover_profiles(), parent=self.root)
 
     # ── console / worker plumbing ────────────────────────────────────────
     def log(self, message: str) -> None:
@@ -949,13 +949,13 @@ class _Panel:
 
     # ── lifecycle ────────────────────────────────────────────────────────
     def run(self) -> None:
-        self.root.mainloop()
+        ui.show_window(self.root, self.parent)
 
 
-def open_panel(section: str = SECTIONS[0]) -> int:
+def open_panel(section: str = SECTIONS[0], parent: tk.Misc | None = None) -> int:
     """Open the manager window. Returns a process exit code."""
     try:
-        panel = _Panel()
+        panel = _Panel(parent)
     except tk.TclError as exc:
         print(f"Could not open the manager window: {exc}")
         return 1

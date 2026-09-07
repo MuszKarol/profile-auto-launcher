@@ -72,6 +72,10 @@ rsync back where it belongs.
   the form rendered them as unticked boxes and then wrote `false` back.
 - Tk images are no longer cached across interpreters — the cached window icon
   outlived its window and raised at shutdown.
+- Every window is built from one Tk root: the launcher hands over to the
+  manager or the editor by hiding rather than closing, and the tests build
+  their windows as children of a single root. Asking Tk for a second root took
+  the whole process down with a bus error on macOS.
 - `theme` now defaults to `dark` rather than `auto`, which on a desktop that
   will not say guessed light.
 

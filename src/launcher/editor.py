@@ -21,7 +21,7 @@ from typing import Any
 
 import yaml
 
-from launcher import scaffold, theme
+from launcher import scaffold, theme, ui
 from launcher.config import (
     KNOWN_FILE_ACTIONS,
     KNOWN_STEP_TYPES,
@@ -152,15 +152,6 @@ def _format_list(value: Any) -> str:
     return "" if value is None else str(value)
 
 
-def _new_window(parent: tk.Misc | None) -> tk.Misc:
-    """A Toplevel when a window already exists, a root when none does.
-
-    Tk allows exactly one root per process; opening the editor from the
-    manager has to reuse it, and opening it from the CLI has to create it.
-    """
-    return tk.Toplevel(parent) if parent is not None else tk.Tk()
-
-
 class _Base:
     """Shared plumbing: the kit, the window, and modal bookkeeping."""
 
@@ -169,17 +160,12 @@ class _Base:
         self.pal = self.kit.pal
         self.m = theme.METRICS
         self.parent = parent
-        self.root = _new_window(parent)
+        self.root = ui.new_window(parent)
         self.kit.chrome(self.root, title)
         self.root.geometry(geometry)
 
     def run(self) -> None:
-        if self.parent is None:
-            self.root.mainloop()
-            return
-        self.root.transient(self.parent)  # type: ignore[arg-type]
-        self.root.grab_set()
-        self.root.wait_window()
+        ui.show_window(self.root, self.parent)
 
 
 # ── the new-profile wizard ───────────────────────────────────────────────
