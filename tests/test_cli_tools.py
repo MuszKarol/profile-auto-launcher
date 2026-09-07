@@ -34,7 +34,7 @@ steps:
     )
     assert main(["list", "--triggers"]) == 0
     out = capsys.readouterr().out
-    assert "★" in out and "Dev" in out
+    assert "* Dev" in out  # the default profile is marked, without a glyph
     assert "hotkey: <ctrl>+<alt>+d" in out
     assert "daily at 09:00" in out
 
@@ -44,7 +44,7 @@ def test_validate_flags_a_broken_profile(write_profile, capsys):
     write_profile("bad", "name: Bad\nsteps:\n  - {type: app}\n")
     assert main(["validate"]) == 1
     out = capsys.readouterr().out
-    assert "✓ ok.yaml" in out and "✗ bad.yaml" in out
+    assert "valid    ok.yaml" in out and "invalid  bad.yaml" in out
     assert "1/2 profiles valid" in out
 
 

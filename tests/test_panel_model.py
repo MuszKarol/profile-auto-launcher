@@ -193,7 +193,7 @@ def test_history_and_stats_rows_read_the_history_file(write_profile):
     assert main(["run", "Dev"]) == 0
 
     (line,) = model.history_rows()
-    assert line.startswith("✓") and "Dev" in line and "1 ok" in line
+    assert line.startswith("ok") and "Dev" in line and "1 ok" in line
 
     header, *rows = model.stats_rows()
     assert "profile" in header and "fail%" in header

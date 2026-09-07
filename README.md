@@ -13,16 +13,19 @@ Windows, Linux and macOS. Python 3.10+.
 </div>
 
 ```
-┌─ ›_  Search profiles and apps… ──────────────────────────────────────────┐
-│  profiles                                                                │
-│  ▌ 🛠  Dev          Spin up the full dev environment          4 steps     │
-│    🎯  Focus        Kill distractions, start the timer        2 steps     │
-│    💼  Work  ★      Mail, calendar, chat                      2 steps     │
-│  applications                                                            │
-│    ▷   Firefox      Web browser                               launch      │
-│  launcher                                                                │
-│    ⚙   Settings     Open the manager                     open manager     │
-│  ↑↓ move   ⏎ run   → preview   ^E edit   ^K stop   ^, manager   esc close │
+┌──────────────────────────────────────────────────────────────────────────┐
+│  >_  Search profiles and apps                                            │
+│                                                                          │
+│  PROFILES                                                                │
+│ ▌   Dev           Spin up the full dev environment            4 steps    │
+│     Focus         Kill distractions, start the timer          2 steps    │
+│     Work          Mail, calendar, chat             default    2 steps    │
+│  APPLICATIONS                                                            │
+│     Firefox       Web browser                                  launch    │
+│  LAUNCHER                                                                │
+│     Settings      Open the manager                       open manager    │
+│                                                                          │
+│  ↑↓ move   ⏎ run   → preview   ^E edit   ^K stop   ^, manager   esc close│
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -77,7 +80,6 @@ A profile is a YAML file, so you can also just write one:
 ```yaml
 name: Dev
 description: Spin up the full dev environment
-icon: "🛠"
 hotkey: <ctrl>+<alt>+d
 
 steps:
@@ -135,6 +137,11 @@ to start at login for you.
 
 Type to filter, `↑↓` to move, `→` to preview the steps, `Enter` to run — and
 watch each step report as it finishes.
+
+The whole interface is monochrome on purpose: one accent (white), no colour
+coding, no emoji, and outline icons only on the navigation and the tool
+headers. Hierarchy comes from weight and space, which is what keeps a window
+this dense readable.
 
 It searches **profiles and installed applications together**, so a context you
 have never bothered to write a profile for is still one keystroke away: type

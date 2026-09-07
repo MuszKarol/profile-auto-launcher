@@ -141,7 +141,10 @@ def build() -> dict[str, Any]:
         "properties": {
             "name": {"type": "string"},
             "description": {"type": "string"},
-            "icon": {"type": "string"},
+            "icon": {
+                "type": "string",
+                "description": "Accepted for older profiles; the interface draws no per-row icons",
+            },
             "default": {"type": "boolean"},
             "autostart": {"type": "boolean"},
             "hotkey": {"type": "string", "examples": ["<ctrl>+<alt>+d"]},

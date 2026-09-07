@@ -275,7 +275,7 @@ def test_a_preset_fills_the_form_but_keeps_a_typed_name(gui):
         wizard.fields["name"].var.set("My Setup")
         wizard._apply_preset(scaffold.preset("focus"))
         assert wizard.fields["name"].var.get() == "My Setup"
-        assert wizard.fields["icon"].var.get() == scaffold.preset("focus").icon
+        assert wizard.fields["description"].var.get() == scaffold.preset("focus").description
         assert "slack" in wizard.close.var.get()
     finally:
         wizard.root.destroy()

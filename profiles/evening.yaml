@@ -2,7 +2,6 @@
 # step types that talk to the outside world (http, plugin).
 name: Evening
 description: Wind down — close work, run Focus, tell the house you're done
-icon: "🌙"
 tags: [routine, home]
 
 triggers:

@@ -1,6 +1,5 @@
 name: Focus
 description: Kill distractions, lo-fi in the background, notes open
-icon: "🎯"
 tags: [quiet, deep-work, notes]
 hotkey: "<ctrl>+<alt>+f"
 

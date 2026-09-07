@@ -284,7 +284,7 @@ def history_rows(limit: int = 30, profile: str | None = None) -> list[str]:
 
     lines = []
     for record in load_history(limit=limit, profile=profile):
-        mark = "✓" if record["failed"] == 0 else "✗"
+        mark = "ok    " if record["failed"] == 0 else "failed"
         kind = "" if record.get("kind") == "run" else f" [{record.get('kind')}]"
         lines.append(
             f"{mark} {record['ts']}  {record['profile']:<16}{kind} "
@@ -383,4 +383,4 @@ def running_rows() -> list[str]:
         active = procs.active_profiles()
     except Exception:
         return []
-    return [f"● {name} ({len(running)})" for name, running in sorted(active.items())]
+    return [f"{name} ({len(running)})" for name, running in sorted(active.items())]

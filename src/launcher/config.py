@@ -236,7 +236,7 @@ class Step:
 class Profile:
     name: str
     description: str = ""
-    icon: str = ""  # short glyph/emoji shown in the HUD and tray
+    icon: str = ""  # accepted for older profiles; the interface draws no icons
     default: bool = False
     autostart: bool = False  # `palaunch tray` runs this profile once at startup
     tags: list[str] = field(default_factory=list)

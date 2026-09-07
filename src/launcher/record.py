@@ -160,7 +160,6 @@ def to_yaml(name: str, candidates: list[Candidate], description: str = "") -> st
     document = {
         "name": name,
         "description": description or f"Recorded session ({len(steps)} apps)",
-        "icon": "\U0001f4fc",
         "steps": steps,
     }
     header = (

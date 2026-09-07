@@ -83,7 +83,7 @@ class _Installer:
             for line in lines:
                 kit.label(
                     card.inner,
-                    f"·  {line}",
+                    line,
                     bg=self.pal.panel,
                     size=SIZE_SMALL,
                     anchor="w",
@@ -109,12 +109,14 @@ class _Installer:
         for line in ops.plan(self._options()):
             kit.label(
                 inner,
-                f"·  {line}",
+                line,
                 bg=self.pal.panel,
                 fg=self.pal.muted,
                 size=SIZE_SMALL,
                 anchor="w",
-            ).pack(fill="x", pady=2)
+                justify="left",
+                wraplength=500,  # a config path is one long word; it has to break
+            ).pack(fill="x", pady=3)
         kit.label(
             inner,
             "\nNothing outside your user account is touched — no administrator rights needed.",
@@ -223,7 +225,7 @@ class _Installer:
                 else:
                     self.notes = ops.install(options, self.messages.put)
             except Exception as exc:  # a failed install must still report
-                self.messages.put(f"✗ {exc}")
+                self.messages.put(f"FAILED  {exc}")
                 self.notes = [f"Setup did not finish: {exc}"]
             finally:
                 self.done.set()
@@ -256,9 +258,7 @@ class _Installer:
             child.destroy()
         heading = kit.label(
             self.body,
-            "✓ Done"
-            if self.notes and "not finish" not in self.notes[0]
-            else "Finished with errors",
+            "Done" if self.notes and "not finish" not in self.notes[0] else "Finished with errors",
             fg=self.pal.ok,
             size=SIZE_BODY,
             bold=True,

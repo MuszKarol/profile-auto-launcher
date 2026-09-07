@@ -32,11 +32,11 @@ def _execute(
     skip: list[str] | None = None,
 ) -> int:
     if dry_run:
-        print(f"▶ dry run of profile: {profile.name}")
+        print(f"dry run of profile: {profile.name}")
         for res in dry_run_profile(profile):
             print(format_result(res))
         return 0
-    print(f"▶ running profile: {profile.name}")
+    print(f"running profile: {profile.name}")
     results = run_profile(
         profile,
         on_result=lambda r: print(format_result(r)),
@@ -46,7 +46,7 @@ def _execute(
     failed = sum(1 for r in results if r.counts_as_failure)
     ok = len(results) - failed
     if failed == 0:
-        notify(f"{profile.name} — profile finished", f"✓ all {ok} steps succeeded")
+        notify(f"{profile.name} — profile finished", f"All {ok} steps succeeded")
     else:
         notify(f"{profile.name} — profile finished with errors", f"{ok} ok, {failed} failed")
     return 0 if failed == 0 else 1
@@ -86,11 +86,10 @@ def _cmd_list(args: argparse.Namespace) -> int:
         return 1
     active = procs.active_profiles()
     for p in profiles:
-        marker = "★" if p.default else " "
-        icon = f"{p.icon} " if p.icon else ""
+        marker = "*" if p.default else " "
         steps = f"({len(p.steps)} steps)"
-        running = f"  ● {len(active[p.name])} running" if p.name in active else ""
-        print(f" {marker} {icon}{p.name:<16} {steps:<12} {p.description}{running}")
+        running = f"  {len(active[p.name])} running" if p.name in active else ""
+        print(f" {marker} {p.name:<16} {steps:<12} {p.description}{running}")
         if p.hotkey:
             print(f"      hotkey: {p.hotkey}")
         if args.triggers:
@@ -140,12 +139,12 @@ def _cmd_stop(args: argparse.Namespace) -> int:
         profile = find_profile(name)
         if profile is None:
             stopped, stubborn = procs.stop_profile(name)
-            print(f"■ {name}: {stopped} process(es) closed, {stubborn} survived")
+            print(f"{name}: {stopped} process(es) closed, {stubborn} survived")
             continue
         results, stopped, stubborn = stop_profile(
             profile, on_result=lambda r: print(format_result(r))
         )
-        print(f"■ {name}: {stopped} process(es) closed, {stubborn} survived")
+        print(f"{name}: {stopped} process(es) closed, {stubborn} survived")
         if stubborn:
             exit_code = 1
         notify(f"{name} — stopped", f"{stopped} process(es) closed")
@@ -165,10 +164,10 @@ def _cmd_switch(args: argparse.Namespace) -> int:
         running = find_profile(name)
         if running is None:
             procs.stop_profile(name)
-            print(f"■ stopped {name}")
+            print(f"stopped {name}")
             continue
         _results, stopped, _stubborn = stop_profile(running)
-        print(f"■ stopped {name} ({stopped} process(es))")
+        print(f"stopped {name} ({stopped} process(es))")
     return _execute(target)
 
 
@@ -181,7 +180,7 @@ def _cmd_status(_args: argparse.Namespace) -> int:
     if not active:
         print("No profile is currently running.")
     for name, running in active.items():
-        print(f"● {name} — {len(running)} process(es)")
+        print(f"{name} — {len(running)} process(es)")
         for proc in running:
             print(f"    {proc.pid:>7}  {proc.label or proc.cmd[:50]}")
     state = load_state()
@@ -208,7 +207,7 @@ def _cmd_validate(args: argparse.Namespace) -> int:
             prof = load_profile(path)
         except Exception as exc:  # yaml/schema errors of any shape
             errors += 1
-            print(f" ✗ {path.name}: {exc}")
+            print(f"  invalid  {path.name}: {exc}")
             continue
         extras = []
         if prof.triggers:
@@ -216,7 +215,7 @@ def _cmd_validate(args: argparse.Namespace) -> int:
         if prof.teardown:
             extras.append(f"{len(prof.teardown)} teardown step(s)")
         suffix = f" [{', '.join(extras)}]" if extras else ""
-        print(f" ✓ {path.name}: '{prof.name}' — {len(prof.steps)} steps{suffix}")
+        print(f"  valid    {path.name}: '{prof.name}' — {len(prof.steps)} steps{suffix}")
     print(f"{len(paths) - errors}/{len(paths)} profiles valid.")
     if args.schema:
         from launcher import schema
@@ -245,12 +244,11 @@ def _cmd_new(args: argparse.Namespace) -> int:
         print(f"Profile file already exists: {path}", file=sys.stderr)
         return 1
 
-    described = bool(args.app or args.url or args.close or args.description or args.icon)
+    described = bool(args.app or args.url or args.close or args.description)
     if described:
         draft = scaffold.Draft(
             name=args.name,
             description=args.description or "",
-            icon=args.icon or "",
             tags=args.tag or [],
             apps=args.app or [],
             urls=args.url or [],
@@ -357,8 +355,8 @@ def _cmd_tray(args: argparse.Namespace) -> int:
     def execute(p: Profile) -> None:
         results = run_profile(p, on_result=lambda r: print(format_result(r)))
         failed = sum(1 for r in results if r.counts_as_failure)
-        print(f"✓ {p.name}: {len(results) - failed} ok, {failed} failed")
-        status = "✓ all steps succeeded" if failed == 0 else f"✗ {failed} step(s) failed"
+        print(f"{p.name}: {len(results) - failed} ok, {failed} failed")
+        status = "All steps succeeded" if failed == 0 else f"{failed} step(s) failed"
         notify(f"{p.name} — profile finished", status)
 
     def stop(p: Profile) -> None:
@@ -379,7 +377,7 @@ def _cmd_tray(args: argparse.Namespace) -> int:
 
     auto = next((p for p in profiles if p.autostart), None)
     if auto is not None:
-        print(f"▶ autostart profile: {auto.name}")
+        print(f"autostart profile: {auto.name}")
         import threading
 
         threading.Thread(target=execute, args=(auto,), daemon=True).start()
@@ -468,7 +466,7 @@ def _cmd_history(args: argparse.Namespace) -> int:
         print("No history yet.")
         return 1
     for record in records:
-        mark = "✓" if record["failed"] == 0 else "✗"
+        mark = "ok    " if record["failed"] == 0 else "failed"
         kind = "" if record.get("kind") == "run" else f" [{record.get('kind')}]"
         print(
             f"{mark} {record['ts']}  {record['profile']:<14}{kind} "
@@ -477,8 +475,8 @@ def _cmd_history(args: argparse.Namespace) -> int:
         )
         if args.verbose:
             for step in record.get("steps", []):
-                glyph = "○" if step["skipped"] else ("✓" if step["ok"] else "✗")
-                print(f"      {glyph} {step['name']:<24} {step['detail'][:70]}")
+                state = "skipped" if step["skipped"] else ("done" if step["ok"] else "failed")
+                print(f"      {state:<8} {step['name']:<24} {step['detail'][:70]}")
     return 0
 
 
@@ -495,7 +493,7 @@ def _cmd_record(args: argparse.Namespace) -> int:
         print(f"{path} already exists — pass --force to overwrite.", file=sys.stderr)
         return 1
 
-    print(f"● Recording for {args.duration:.0f}s — open the apps you want in '{name}'.")
+    print(f"Recording for {args.duration:.0f}s — open the apps you want in '{name}'.")
     print("  Ctrl+C stops early and keeps what was captured.\n")
 
     def tick(remaining: float, found: int) -> None:
@@ -709,7 +707,6 @@ def build_parser() -> argparse.ArgumentParser:
     new_p = sub.add_parser("new", help="Create a profile")
     new_p.add_argument("name", help="Profile display name")
     new_p.add_argument("--description", help="One line about what it sets up")
-    new_p.add_argument("--icon", help="Emoji shown in the launcher")
     new_p.add_argument("--tag", action="append", default=[], help="Tag (repeatable)")
     new_p.add_argument(
         "--app",
@@ -846,9 +843,9 @@ def build_parser() -> argparse.ArgumentParser:
 def _force_utf8_stdio() -> None:
     """Avoid UnicodeEncodeError on legacy Windows codepages (cp1250, cp1252).
 
-    The marker glyphs we print (★ ▶ ✓) are non-ASCII; without this, palaunch
-    crashes on a default `cmd.exe` console. `reconfigure` is a no-op on streams
-    that already speak UTF-8.
+    Profile names, descriptions and paths are the user's, and an em dash or an
+    accented character is enough to crash palaunch on a default `cmd.exe`
+    console. `reconfigure` is a no-op on streams that already speak UTF-8.
     """
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)

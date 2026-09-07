@@ -53,7 +53,8 @@ running.
 | `launcher.mirror`      | rsync-style directory mirroring, with a built-in fallback |
 | `launcher.scaffold`    | Answers → a valid profile file (the wizard and `palaunch new`) |
 | `launcher.branding`    | The app mark, drawn to PNG/ICO/SVG in pure Python        |
-| `launcher.theme`       | Palette, spacing and font tokens — dark by default       |
+| `launcher.theme`       | Palette, spacing and font tokens — monochrome, dark by default |
+| `launcher.icons`       | The outline icon set, drawn on a canvas from a 24-unit grid |
 | `launcher.ui`          | The widget kit all three windows are built from          |
 | `launcher.hud`         | The launcher window: profiles, apps and actions in one list |
 | `launcher.editor`      | The new-profile wizard and the step editor               |
@@ -174,6 +175,10 @@ Other execution properties:
       pages — Launch, Profiles, Sync, Activity, Settings — covering every
       setting, profile action, secret, sync operation, history view, log tail
       and path the CLI exposes
+- [x] One monochrome design system: deep black ground, white as the only
+      accent, two text tones, outline icons on navigation and tool headers and
+      nowhere else, and no emoji anywhere. `tests/test_design.py` holds the
+      window to it.
 - [x] Dark by default, with a light palette and an `auto` mode that follows
       the desktop
 - [x] System tray with a self-refreshing menu and a Stop submenu
@@ -231,7 +236,7 @@ modeline is written into every profile `palaunch new` scaffolds:
 ```yaml
 name: string            # display name (required; defaults to the file stem)
 description: string
-icon: "🛠"              # shown in the HUD and tray
+icon: "…"               # accepted for older profiles; nothing draws it now
 default: bool           # ★ in `palaunch list`; used when `run` gets no name
 autostart: bool         # the tray runs this once at login
 hotkey: "<ctrl>+<alt>+d"  # per-profile global shortcut
@@ -489,6 +494,8 @@ for i, step in enumerate(steps):
 | **Python 3.10+** | Ships on macOS/Linux, trivial on Windows; `asyncio` and `subprocess` cover every launch mode we need. |
 | **YAML profiles** | Editable by hand, diffable in git, and a JSON Schema gives autocomplete without writing an editor plugin. |
 | **Tkinter for every window** | Standard library. A launcher you install to save time should not pull a GUI toolkit first. `launcher.ui` supplies the widgets Tk lacks, so the windows still look like this decade. |
+| **A monochrome palette** | One accent means one thing can be the most important thing on screen, and it survives every display and colour-blindness. Status is carried by weight and tone: a failure is the brightest text in the window, ordinary success is body text, anything skipped drops to grey. |
+| **Icons drawn, not imported** | Four navigation entries do not justify an icon font. `launcher.icons` strokes them on a canvas from a 24-unit grid, so they take the palette's colour, scale to any size and look identical on all three platforms. |
 | **The icon is code** | `launcher.branding` draws the mark to PNG, ICO and SVG in pure Python, so the tray, the window icons, the installers and the README cannot drift apart — and CI checks the committed files still match. |
 | **asyncio, not threads** | Steps are almost entirely I/O — spawning, polling ports, waiting on HTTP. One event loop keeps ordering explicit and cancellation sane. |
 | **Optional extras** | pystray, pynput, keyring and psutil are all optional; every integration degrades to a logged message instead of an ImportError. |

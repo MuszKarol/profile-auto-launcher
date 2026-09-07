@@ -112,7 +112,6 @@ DEFAULT_TRUE = ("enabled", "detach", "track")
 PROFILE_FIELDS = [
     ("name", "Name", "str"),
     ("description", "Description", "str"),
-    ("icon", "Icon (emoji)", "str"),
     ("tags", "Tags (comma separated)", "list"),
     ("hotkey", "Hotkey (e.g. <ctrl>+<alt>+d)", "str"),
     ("default", "Default profile", "bool"),
@@ -210,12 +209,7 @@ class _Wizard(_Base):
         presets = kit.frame(outer)
         presets.pack(fill="x", pady=(0, self.m.gap))
         for item in scaffold.PRESETS:
-            kit.button(
-                presets,
-                f"{item.icon}  {item.title}",
-                lambda p=item: self._apply_preset(p),
-                kind="quiet",
-            )
+            kit.button(presets, item.title, lambda p=item: self._apply_preset(p), kind="quiet")
 
         form = kit.frame(outer)
         form.pack(fill="x")
@@ -225,7 +219,6 @@ class _Wizard(_Base):
             (
                 ("name", "Name"),
                 ("description", "Description"),
-                ("icon", "Icon (emoji)"),
                 ("tags", "Tags (comma separated)"),
                 ("hotkey", "Hotkey (optional)"),
             )
@@ -310,7 +303,6 @@ class _Wizard(_Base):
     def _apply_preset(self, item: scaffold.Preset) -> None:
         if not self.fields["name"].var.get().strip():
             self.fields["name"].var.set(item.title)
-        self.fields["icon"].var.set(item.icon)
         self.fields["description"].var.set(item.description)
         self.fields["tags"].var.set(", ".join(item.tags))
         self.close.var.set(", ".join(item.close))
@@ -353,7 +345,6 @@ class _Wizard(_Base):
         return scaffold.Draft(
             name=self.fields["name"].var.get().strip(),
             description=self.fields["description"].var.get().strip(),
-            icon=self.fields["icon"].var.get().strip(),
             tags=_split_list(self.fields["tags"].var.get()),
             hotkey=self.fields["hotkey"].var.get().strip(),
             apps=list(self.chosen_apps),

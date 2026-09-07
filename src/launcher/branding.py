@@ -1,9 +1,13 @@
 """The application mark, drawn in pure Python.
 
 One shape — a `>_` prompt inside a rounded square — rendered at any size for
-the tray, the window icons, the installer and the repository assets. Drawing
-it here rather than shipping a binary keeps every surface consistent and lets
-the ICO/PNG/SVG files be regenerated with `python -m launcher.branding`.
+the tray, the window icons, the installer and the repository assets. It is
+white on black, like the rest of the interface: a solid mark reads better than
+an outline at the 16 pixels a tray gives it, and `launcher.icons` draws the
+same prompt as a stroke for use inside the windows.
+
+Drawing it here rather than shipping a binary keeps every surface consistent
+and lets the ICO/PNG/SVG files be regenerated with `python -m launcher.branding`.
 
 Pillow is optional: it is only needed to hand pystray an `Image`, and the
 raster path below does not use it.
@@ -20,8 +24,10 @@ from pathlib import Path
 APP_NAME = "Profile Auto Launcher"
 APP_ID = "profile-auto-launcher"
 
-BADGE = (0x6D, 0x8C, 0xFF, 0xFF)  # accent
-GLYPH = (0x0B, 0x0E, 0x14, 0xFF)  # ink drawn on the badge
+# The product's own surface in miniature: the window ground, with the one
+# accent drawn on it. A white badge would vanish into a light taskbar.
+BADGE = (0x09, 0x09, 0x0B, 0xFF)
+GLYPH = (0xFF, 0xFF, 0xFF, 0xFF)
 
 
 def _rounded_rect(x: float, y: float, half: float, radius: float) -> float:

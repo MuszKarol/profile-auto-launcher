@@ -7,6 +7,13 @@ import pytest
 from launcher import scaffold
 
 
+def test_no_preset_carries_an_emoji():
+    """The interface is monochrome and text-only; presets seed copy, not glyphs."""
+    for preset in scaffold.PRESETS:
+        assert preset.title.isascii()
+        assert preset.description.isascii()
+
+
 def test_a_name_becomes_a_filename():
     assert scaffold.slugify("My Dev Setup") == "my-dev-setup"
     assert scaffold.slugify("  Work/Home  ") == "work-home"
@@ -18,7 +25,6 @@ def test_a_draft_becomes_a_profile_the_loader_accepts(monkeypatch, profiles_dir)
     draft = scaffold.Draft(
         name="Dev",
         description="the desk",
-        icon="🛠",
         tags=["code"],
         apps=["code", "terminal", "notes"],
         urls=["https://example.com"],
@@ -73,7 +79,6 @@ def test_every_preset_is_usable_as_a_starting_point():
         draft = scaffold.Draft(
             name=preset.title,
             description=preset.description,
-            icon=preset.icon,
             tags=list(preset.tags),
             close=list(preset.close),
         )
