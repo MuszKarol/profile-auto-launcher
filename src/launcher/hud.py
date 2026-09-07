@@ -1,13 +1,12 @@
-"""HUD-style profile picker built on Tkinter (stdlib, always available).
+"""The launcher window: one search box over profiles, apps and actions.
 
-Keyboard-first: type to filter (fuzzy), ↑/↓ to move, → to preview the steps,
-Enter to run, Ctrl+E to edit, Ctrl+K to stop a running profile, Esc to close.
-After picking, the HUD streams per-step results live, so you see exactly which
-steps succeeded — then auto-closes on success.
+Keyboard-first, Spotlight-shaped. Type to filter, ↑/↓ to move, → to preview
+what a profile will do, Enter to run it — and then watch each step report as
+it finishes. Typing the name of an installed application launches just that
+one program, which is the fast path a whole profile is too much for.
 
-The list also carries `Action` entries — "Settings" opens the configuration
-panel. They are filtered and picked exactly like profiles, so the launcher is
-the single entry point to everything rather than one of two.
+Everything the launcher can reach is a row: profiles, applications, and
+actions such as opening the manager window. One list, one ranking, one Enter.
 """
 
 from __future__ import annotations
@@ -17,8 +16,10 @@ import threading
 import tkinter as tk
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
 
-from launcher import theme
+from launcher import fuzzy, theme
+from launcher.apps import App
 from launcher.config import Profile
 from launcher.executor import (
     StepResult,
@@ -28,6 +29,17 @@ from launcher.executor import (
     stop_profile,
 )
 from launcher.state import load_state
+from launcher.theme import SIZE_BODY, SIZE_DISPLAY, SIZE_SMALL, SIZE_TINY
+from launcher.ui import Kit
+
+MAX_APP_RESULTS = 6
+
+# Measured row geometry, used to size the window to its content. Tk packs
+# children past the edge of a frame rather than scrolling them, so the window
+# has to be told how tall its list actually is.
+ROW_HEIGHT = 61
+GROUP_HEIGHT = 25
+CHROME_HEIGHT = 148
 
 
 @dataclass
@@ -45,10 +57,23 @@ class Action:
     hotkey: str = ""
 
 
+@dataclass
+class Row:
+    """One line in the list, whatever it stands for."""
+
+    kind: str  # profile | app | action
+    name: str
+    description: str
+    icon: str
+    tail: str
+    payload: Any
+    badge: tuple[str, str] | None = None
+
+
 def default_actions() -> list[Action]:
     """The actions every HUD offers. Kept a function so tests can substitute."""
 
-    def open_settings() -> None:
+    def open_manager() -> None:
         from launcher.panel import open_panel
 
         open_panel()
@@ -56,40 +81,17 @@ def default_actions() -> list[Action]:
     return [
         Action(
             name="Settings",
-            description="Configure the launcher, profiles, secrets and sync",
-            run=open_settings,
-            tags=["settings", "config", "preferences", "options"],
-            hint="open panel",
+            description="Open the manager: profiles, apps, sync, settings",
+            run=open_manager,
+            tags=["settings", "config", "preferences", "options", "manager"],
+            hint="open manager",
         )
     ]
 
 
-def _fuzzy_score(q: str, text: str) -> int | None:
-    """Score a match: prefix > word-start > substring > subsequence > miss."""
-    text = text.lower()
-    if not q:
-        return 0
-    if text.startswith(q):
-        return 100
-    if any(word.startswith(q) for word in text.split()):
-        return 80
-    if q in text:
-        return 60
-    it = iter(text)
-    if all(ch in it for ch in q):
-        return 30
-    return None
-
-
-def _match(q: str, p: Profile | Action) -> int | None:
+def _match(query: str, entry: Profile | Action) -> int | None:
     """Best score across a row's name, description and tags — or None."""
-    scores = [
-        _fuzzy_score(q, p.name),
-        _fuzzy_score(q, p.description),
-        *(_fuzzy_score(q, t) for t in p.tags),
-    ]
-    hits = [s for s in scores if s is not None]
-    return max(hits) if hits else None
+    return fuzzy.best(query, [entry.name, entry.description, *entry.tags])
 
 
 def _active_names() -> set[str]:
@@ -111,16 +113,17 @@ class _Hud:
         from launcher import settings
 
         self.conf = settings.load()
-        self.pal = theme.palette()
-        self.font = theme.font_family()
-        self.mono = theme.mono_family()
+        self.kit = Kit()
+        self.pal = self.kit.pal
+        self.font = self.kit.font
+        self.mono = self.kit.mono
 
         self.profiles = profiles
         self.actions = list(actions if actions is not None else default_actions())
         self.execute = execute
-        self.filtered: list[Profile | Action] = [*profiles, *self.actions]
+        self.filtered: list[Row] = []
         self.index = 0
-        self.rows: list[tk.Frame] = []
+        self.rows: list[tk.Widget] = []
         self.chosen: Profile | None = None
         self.exit_code = 0
         self.failed_count = 0
@@ -138,7 +141,9 @@ class _Hud:
 
         self.root = tk.Tk()
         self.root.withdraw()
-        self.root.title("Profile Auto Launcher")
+        self.kit.chrome(self.root, "Profile Auto Launcher")
+        # The border is the window's only frame: overrideredirect removes the
+        # title bar, so the ground colour has to draw the outline itself.
         self.root.configure(bg=self.pal.border)
         try:
             self.root.attributes("-topmost", True)
@@ -146,24 +151,39 @@ class _Hud:
             pass
         self.root.overrideredirect(True)
 
-        self.base_width = max(420, self.conf.hud_width)
-        self.height = max(300, self.conf.hud_height)
+        self.base_width = max(480, self.conf.hud_width)
+        self.max_height = max(320, self.conf.hud_height)
+        self.height = self.max_height
+        self.width = self.base_width
         self._resize(self.base_width)
 
-        self.outer = tk.Frame(self.root, bg=self.pal.bg, padx=18, pady=16)
+        self.outer = tk.Frame(
+            self.root, bg=self.pal.bg, padx=theme.METRICS.gap_lg, pady=theme.METRICS.pad
+        )
         self.outer.pack(fill="both", expand=True, padx=1, pady=1)
 
         self._build_picker()
+        self._warm_app_index()
         self.root.after(100, self._watch_close)
         self.root.deiconify()
 
-    def _resize(self, width: int) -> None:
+    # ── window ───────────────────────────────────────────────────────────
+    def _resize(self, width: int, height: int | None = None) -> None:
         screen_w = self.root.winfo_screenwidth()
         screen_h = self.root.winfo_screenheight()
-        width = min(width, screen_w - 40)
+        self.width = min(width, screen_w - 40)
+        self.height = min(height or self.height, screen_h - 80)
         self.root.geometry(
-            f"{width}x{self.height}+{(screen_w - width) // 2}+{(screen_h - self.height) // 3}"
+            f"{self.width}x{self.height}"
+            f"+{(screen_w - self.width) // 2}+{(screen_h - self.height) // 3}"
         )
+
+    def _fit_to_content(self, groups: int) -> None:
+        """Grow and shrink with the result list, the way a palette should."""
+        if self.running:
+            return
+        needed = CHROME_HEIGHT + len(self.filtered) * ROW_HEIGHT + groups * GROUP_HEIGHT
+        self._resize(self.width, min(self.max_height, max(220, needed)))
 
     def request_close(self) -> None:
         """Thread-safe close request; honoured within ~100 ms."""
@@ -179,14 +199,26 @@ class _Hud:
         if self.root.winfo_exists():
             self.root.after(100, self._watch_close)
 
+    def _warm_app_index(self) -> None:
+        """Build the application index off the UI thread, so the first
+        keystroke searches a warm cache instead of scanning `PATH`."""
+
+        def warm() -> None:
+            from launcher import apps
+
+            try:
+                apps.index()
+            except Exception:  # an unusable index must not break the picker
+                pass
+
+        threading.Thread(target=warm, daemon=True, name="pal-app-index").start()
+
     # ── picker view ──────────────────────────────────────────────────────
     def _build_picker(self) -> None:
-        pal = self.pal
-        header = tk.Frame(self.outer, bg=pal.bg)
+        kit, pal = self.kit, self.pal
+        header = kit.frame(self.outer)
         header.pack(fill="x")
-        tk.Label(header, text="◈", bg=pal.bg, fg=pal.accent, font=(self.font, 14, "bold")).pack(
-            side="left", padx=(0, 8)
-        )
+        kit.brand(header, 24).pack(side="left", padx=(0, theme.METRICS.gap))
 
         self.query = tk.StringVar()
         self.entry = tk.Entry(
@@ -196,51 +228,52 @@ class _Hud:
             fg=pal.fg,
             insertbackground=pal.accent,
             relief="flat",
-            font=(self.font, 15),
+            font=kit.f(SIZE_DISPLAY),
             highlightthickness=0,
         )
         self.entry.pack(side="left", fill="x", expand=True, ipady=6)
         self.entry.focus_set()
 
-        self.placeholder = tk.Label(
-            header, text="Search profiles…", bg=pal.bg, fg=pal.muted, font=(self.font, 15)
+        self.placeholder = kit.label(
+            header, "Search profiles and apps…", fg=pal.faint, size=SIZE_DISPLAY
         )
-        self.placeholder.place(in_=self.entry, x=2, y=6)
+        self.placeholder.place(in_=self.entry, x=2, y=4)
         self.placeholder.bind("<Button-1>", lambda _e: self.entry.focus_set())
 
-        tk.Frame(self.outer, bg=pal.border, height=1).pack(fill="x", pady=(10, 12))
+        kit.divider(self.outer, pady=(theme.METRICS.gap, theme.METRICS.gap))
 
-        self.body = tk.Frame(self.outer, bg=pal.bg)
+        self.body = kit.frame(self.outer)
         self.body.pack(fill="both", expand=True)
 
-        self.list_frame = tk.Frame(self.body, bg=pal.bg)
+        self.list_frame = kit.frame(self.body)
         self.list_frame.pack(side="left", fill="both", expand=True)
 
-        self.preview_frame = tk.Frame(self.body, bg=pal.panel, padx=12, pady=10)
-
-        self.footer = tk.Label(
-            self.outer,
-            text=(
-                "↑↓ navigate    ⏎ run    → preview    ctrl+e edit    "
-                "ctrl+k stop    ctrl+, settings    esc close"
-            ),
-            bg=pal.bg,
-            fg=pal.muted,
-            font=(self.font, 9),
+        self.preview_frame = tk.Frame(
+            self.body, bg=pal.panel, padx=theme.METRICS.gap, pady=theme.METRICS.gap
         )
-        self.footer.pack(anchor="w", pady=(10, 0))
+
+        self.footer = kit.label(
+            self.outer,
+            "↑↓ move    ⏎ run    → preview    ^E edit    ^K stop    ^, manager    esc close",
+            fg=pal.faint,
+            size=SIZE_TINY,
+        )
+        self.footer.pack(anchor="w", pady=(theme.METRICS.gap, 0))
 
         self.query.trace_add("write", lambda *_: self._redraw())
-        self.root.bind("<Return>", self._commit)
-        self.root.bind("<Escape>", self._cancel)
+        for sequence, handler in (
+            ("<Return>", self._commit),
+            ("<Escape>", self._cancel),
+            ("<Control-e>", self._edit_selected),
+            ("<Control-k>", self._stop_selected),
+            ("<Control-comma>", self._open_settings),
+        ):
+            self.root.bind(sequence, handler)
         self.root.bind("<Up>", lambda _e: self._move(-1))
         self.root.bind("<Down>", lambda _e: self._move(1))
         self.root.bind("<Right>", lambda _e: self._set_preview(True))
         self.root.bind("<Left>", lambda _e: self._set_preview(False))
         self.root.bind("<Tab>", lambda _e: self._set_preview(not self.preview_open))
-        self.root.bind("<Control-e>", self._edit_selected)
-        self.root.bind("<Control-k>", self._stop_selected)
-        self.root.bind("<Control-comma>", self._open_settings)
         self.root.bind("<FocusOut>", self._maybe_close_on_blur)
         self._redraw()
 
@@ -255,110 +288,189 @@ class _Hud:
         if not self.running and self.root.winfo_exists() and self.root.focus_get() is None:
             self._cancel()
 
+    # ── result set ───────────────────────────────────────────────────────
+    def _profile_rows(self, query: str) -> list[Row]:
+        scored = []
+        for profile in self.profiles:
+            rank = _match(query, profile)
+            if rank is not None:
+                scored.append((rank, profile))
+        scored.sort(
+            key=lambda pair: (
+                -pair[0],
+                pair[1].name != self.last_profile,  # last-run profile floats up
+                -self.run_counts.get(pair[1].name, 0),
+                pair[1].name.lower(),
+            )
+        )
+        rows = []
+        for _rank, profile in scored:
+            if profile.name in self.active:
+                badge = ("● running", self.pal.ok)
+            elif profile.name == self.last_profile:
+                badge = ("↺ recent", self.pal.accent)
+            else:
+                badge = None
+            rows.append(
+                Row(
+                    kind="profile",
+                    name=profile.name + ("  ★" if profile.default else ""),
+                    description=profile.description,
+                    icon=profile.icon or "▣",
+                    tail=f"{len(profile.steps)} steps",
+                    payload=profile,
+                    badge=badge,
+                )
+            )
+        return rows
+
+    def _app_rows(self, query: str, taken: set[str]) -> list[Row]:
+        """Installed applications matching the query — the single-app path.
+
+        Only from two characters: one letter matches most of `PATH`, and the
+        profiles are what the launcher is for.
+        """
+        if len(query) < 2:
+            return []
+        from launcher import apps
+
+        try:
+            found = apps.search(query, limit=MAX_APP_RESULTS)
+        except Exception:
+            return []
+        return [
+            Row(
+                kind="app",
+                name=app.name,
+                description=apps.describe(app),
+                icon="▷",
+                tail="launch",
+                payload=app,
+            )
+            for app in found
+            if app.name.lower() not in taken
+        ]
+
+    def _row_budget(self) -> int:
+        """How many rows the tallest allowed window can show."""
+        room = self.max_height - CHROME_HEIGHT - 3 * GROUP_HEIGHT
+        return max(3, room // ROW_HEIGHT)
+
     def _redraw(self) -> None:
-        pal = self.pal
-        q = self.query.get().lower().strip()
+        query = self.query.get().lower().strip()
         if self.query.get():
             self.placeholder.place_forget()
         else:
-            self.placeholder.place(in_=self.entry, x=2, y=6)
+            self.placeholder.place(in_=self.entry, x=2, y=4)
 
-        scored = []
-        for p in self.profiles:
-            s = _match(q, p)
-            if s is not None:
-                scored.append((s, p))
-        scored.sort(
-            key=lambda sp: (
-                -sp[0],
-                sp[1].name != self.last_profile,  # last-run profile floats up
-                -self.run_counts.get(sp[1].name, 0),
-                sp[1].name.lower(),
-            )
-        )
+        profile_rows = self._profile_rows(query)
         # Actions sit below the profiles unless the query names one directly,
         # so typing a profile name never puts "Settings" under the cursor.
-        actions = [(a, _match(q, a)) for a in self.actions]
-        matched = [a for a, score in actions if score is not None]
-        exact = [a for a, score in actions if score is not None and score >= 80]
-        self.filtered = [*exact, *[p for _, p in scored], *[a for a in matched if a not in exact]]
+        scored_actions = [(action, _match(query, action)) for action in self.actions]
+        exact = [a for a, rank in scored_actions if rank is not None and rank >= fuzzy.WORD_START]
+        rest = [a for a, rank in scored_actions if rank is not None and a not in exact]
+        action_rows = [
+            Row("action", a.name, a.description, a.icon, a.hint, a) for a in [*exact, *rest]
+        ]
+        exact_rows, weak_rows = action_rows[: len(exact)], action_rows[len(exact) :]
+        taken = {row.name.lower() for row in profile_rows}
+        # Order of intent: an action the query named, the profiles, a single
+        # app, and only then an action the query merely brushed against.
+        self.filtered = [
+            *exact_rows,
+            *profile_rows,
+            *self._app_rows(query, taken),
+            *weak_rows,
+        ][: self._row_budget()]
         self.index = min(self.index, max(len(self.filtered) - 1, 0))
 
-        for row in self.rows:
-            row.destroy()
+        for widget in self.rows:
+            widget.destroy()
         self.rows.clear()
 
         if not self.filtered:
-            empty = tk.Frame(self.list_frame, bg=pal.bg)
-            tk.Label(
+            empty = self.kit.frame(self.list_frame)
+            self.kit.label(
+                empty, f"Nothing matches “{query}”", fg=self.pal.muted, size=SIZE_BODY
+            ).pack(pady=(28, 4))
+            self.kit.label(
                 empty,
-                text="No matching profiles",
-                bg=pal.bg,
-                fg=pal.muted,
-                font=(self.font, 11),
-            ).pack(pady=24)
+                "Try part of a profile name, or an installed app",
+                fg=self.pal.faint,
+                size=SIZE_SMALL,
+            ).pack()
             empty.pack(fill="x")
             self.rows.append(empty)
+            self._fit_to_content(groups=0)
             return
 
-        for i, p in enumerate(self.filtered):
-            self.rows.append(self._make_row(i, p))
+        previous_kind = ""
+        kinds = {row.kind for row in self.filtered}
+        for position, row in enumerate(self.filtered):
+            if len(kinds) > 1 and row.kind != previous_kind:
+                header = self.kit.label(
+                    self.list_frame,
+                    {"profile": "profiles", "app": "applications", "action": "launcher"}[row.kind],
+                    fg=self.pal.faint,
+                    size=SIZE_TINY,
+                    bold=True,
+                    anchor="w",
+                )
+                header.pack(fill="x", pady=(theme.METRICS.gap_sm, 2))
+                self.rows.append(header)
+                previous_kind = row.kind
+            self.rows.append(self._make_row(position, row))
+        self._fit_to_content(groups=len(kinds) if len(kinds) > 1 else 0)
         self._highlight()
 
-    def _make_row(self, i: int, p: Profile) -> tk.Frame:
-        pal = self.pal
-        row = tk.Frame(self.list_frame, bg=pal.panel, padx=12, pady=8)
-        row.pack(fill="x", pady=3)
+    def _make_row(self, position: int, entry: Row) -> tk.Frame:
+        pal, kit = self.pal, self.kit
+        row = tk.Frame(
+            self.list_frame, bg=pal.panel, padx=theme.METRICS.gap, pady=theme.METRICS.gap_sm
+        )
+        row.pack(fill="x", pady=2)
 
         bar = tk.Frame(row, bg=pal.panel, width=3)
-        bar.pack(side="left", fill="y", padx=(0, 10))
+        bar.pack(side="left", fill="y", padx=(0, theme.METRICS.gap_sm))
         row.accent_bar = bar  # type: ignore[attr-defined]
 
-        icon = p.icon or "▣"
-        tk.Label(row, text=icon, bg=pal.panel, fg=pal.accent, font=(self.font, 13)).pack(
-            side="left", padx=(0, 10)
+        kit.label(row, entry.icon, bg=pal.panel, fg=pal.accent, size=SIZE_BODY).pack(
+            side="left", padx=(0, theme.METRICS.gap_sm)
         )
 
         text = tk.Frame(row, bg=pal.panel)
         text.pack(side="left", fill="x", expand=True)
-        title = p.name + ("  ★" if p.default else "")
-        tk.Label(
-            text, text=title, bg=pal.panel, fg=pal.fg, font=(self.font, 12, "bold"), anchor="w"
-        ).pack(fill="x")
-        if p.description:
-            tk.Label(
+        kit.label(text, entry.name, bg=pal.panel, size=SIZE_BODY, bold=True, anchor="w").pack(
+            fill="x"
+        )
+        if entry.description:
+            kit.label(
                 text,
-                text=p.description,
+                entry.description[:70],
                 bg=pal.panel,
                 fg=pal.muted,
-                font=(self.font, 9),
+                size=SIZE_TINY,
                 anchor="w",
             ).pack(fill="x")
 
-        tail = p.hint if isinstance(p, Action) else f"{len(p.steps)} steps"
-        tk.Label(row, text=tail, bg=pal.panel, fg=pal.muted, font=(self.font, 9)).pack(side="right")
-        if isinstance(p, Action):
-            badge = None
-        elif p.name in self.active:
-            badge = ("● running", pal.ok)
-        elif p.name == self.last_profile:
-            badge = ("↺ recent", pal.accent)
-        else:
-            badge = None
-        if badge is not None:
-            tk.Label(row, text=badge[0], bg=pal.panel, fg=badge[1], font=(self.font, 9)).pack(
-                side="right", padx=(0, 10)
+        if entry.tail:
+            kit.label(row, entry.tail, bg=pal.panel, fg=pal.faint, size=SIZE_TINY).pack(
+                side="right"
+            )
+        if entry.badge is not None:
+            kit.label(row, entry.badge[0], bg=pal.panel, fg=entry.badge[1], size=SIZE_TINY).pack(
+                side="right", padx=(0, theme.METRICS.gap_sm)
             )
 
-        def set_bg(color: str) -> None:
+        def set_bg(colour: str) -> None:
             for widget in (row, text, *row.winfo_children(), *text.winfo_children()):
                 if widget is not bar:
-                    widget.configure(bg=color)
+                    widget.configure(bg=colour)
 
         row.set_bg = set_bg  # type: ignore[attr-defined]
 
-        def on_enter(_e: tk.Event, idx: int = i) -> None:
-            self.index = idx
+        def on_enter(_event: tk.Event, index: int = position) -> None:
+            self.index = index
             self._highlight()
 
         for widget in (row, text, *row.winfo_children(), *text.winfo_children()):
@@ -367,11 +479,11 @@ class _Hud:
         return row
 
     def _highlight(self) -> None:
-        for i, row in enumerate(self.rows):
-            selected = i == self.index
-            if hasattr(row, "set_bg"):
-                row.set_bg(self.pal.panel_selected if selected else self.pal.panel)
-                row.accent_bar.configure(bg=self.pal.accent if selected else self.pal.panel)
+        selectable = [widget for widget in self.rows if hasattr(widget, "set_bg")]
+        for position, widget in enumerate(selectable):
+            selected = position == self.index
+            widget.set_bg(self.pal.panel_selected if selected else self.pal.panel)
+            widget.accent_bar.configure(bg=self.pal.accent if selected else self.pal.panel)
         if self.preview_open:
             self._render_preview()
 
@@ -381,94 +493,102 @@ class _Hud:
         self.index = (self.index + delta) % len(self.filtered)
         self._highlight()
 
+    @property
+    def selected(self) -> Row | None:
+        if not self.filtered:
+            return None
+        return self.filtered[min(self.index, len(self.filtered) - 1)]
+
     # ── step preview ─────────────────────────────────────────────────────
     def _set_preview(self, visible: bool) -> str:
         if self.running or visible == self.preview_open:
             return "break"
         self.preview_open = visible
         if visible:
-            self._resize(int(self.base_width * 1.55))
-            self.preview_frame.pack(side="right", fill="both", padx=(12, 0))
+            self._resize(int(self.base_width * 1.55), self.max_height)
+            self.preview_frame.pack(side="right", fill="both", padx=(theme.METRICS.gap, 0))
             self._render_preview()
         else:
             self.preview_frame.pack_forget()
             self._resize(self.base_width)
+            self._redraw()
         return "break"  # keep Tab from moving focus out of the entry
 
     def _render_preview(self) -> None:
-        pal = self.pal
+        pal, kit = self.pal, self.kit
         for child in self.preview_frame.winfo_children():
             child.destroy()
-        if not self.filtered:
+        entry = self.selected
+        if entry is None:
             return
-        profile = self.filtered[self.index]
-        if isinstance(profile, Action):
-            tk.Label(
-                self.preview_frame,
-                text=profile.description,
-                bg=pal.panel,
-                fg=pal.muted,
-                font=(self.font, 10),
-                wraplength=240,
-                justify="left",
-            ).pack(fill="x")
-            return
-        tk.Label(
-            self.preview_frame,
-            text=profile.name,
-            bg=pal.panel,
-            fg=pal.fg,
-            font=(self.font, 11, "bold"),
-            anchor="w",
+        kit.label(
+            self.preview_frame, entry.name, bg=pal.panel, size=SIZE_BODY, bold=True, anchor="w"
         ).pack(fill="x")
-        if profile.tags:
-            tk.Label(
+        if entry.kind != "profile":
+            kit.label(
                 self.preview_frame,
-                text=" · ".join(profile.tags),
+                entry.description,
                 bg=pal.panel,
                 fg=pal.muted,
-                font=(self.font, 9),
+                size=SIZE_SMALL,
+                wraplength=260,
+                justify="left",
                 anchor="w",
-            ).pack(fill="x", pady=(0, 6))
+            ).pack(fill="x", pady=(4, 0))
+            return
+
+        profile: Profile = entry.payload
+        if profile.tags:
+            kit.label(
+                self.preview_frame,
+                " · ".join(profile.tags),
+                bg=pal.panel,
+                fg=pal.faint,
+                size=SIZE_TINY,
+                anchor="w",
+            ).pack(fill="x", pady=(0, theme.METRICS.gap_sm))
 
         shown = profile.steps[:14]
         for step in shown:
             line = tk.Frame(self.preview_frame, bg=pal.panel)
             line.pack(fill="x", pady=1)
             glyph = "○" if not step.enabled else ("⇉" if step.parallel else "→")
-            tk.Label(
+            kit.label(
                 line,
-                text=glyph,
+                glyph,
                 bg=pal.panel,
-                fg=pal.muted if not step.enabled else pal.accent,
-                font=(self.font, 9),
+                fg=pal.faint if not step.enabled else pal.accent,
+                size=SIZE_TINY,
                 width=2,
             ).pack(side="left")
-            tk.Label(
+            kit.label(
                 line,
-                text=describe_step(step)[:64],
+                describe_step(step)[:64],
                 bg=pal.panel,
-                fg=pal.muted if not step.enabled else pal.fg,
-                font=(self.mono, 8),
+                fg=pal.faint if not step.enabled else pal.fg,
+                size=SIZE_TINY,
+                mono=True,
                 anchor="w",
                 justify="left",
             ).pack(side="left", fill="x", expand=True)
         if len(profile.steps) > len(shown):
-            tk.Label(
+            kit.label(
                 self.preview_frame,
-                text=f"… +{len(profile.steps) - len(shown)} more",
+                f"… +{len(profile.steps) - len(shown)} more",
                 bg=pal.panel,
-                fg=pal.muted,
-                font=(self.font, 9),
+                fg=pal.faint,
+                size=SIZE_TINY,
                 anchor="w",
             ).pack(fill="x", pady=(4, 0))
 
     # ── secondary actions ────────────────────────────────────────────────
+    def _selected_profile(self) -> Profile | None:
+        entry = self.selected
+        return entry.payload if entry is not None and entry.kind == "profile" else None
+
     def _edit_selected(self, _event=None) -> str:
-        if self.running or not self.filtered:
-            return "break"
-        profile = self.filtered[self.index]
-        if isinstance(profile, Action):
+        profile = self._selected_profile()
+        if self.running or profile is None:
             return "break"
         self.chosen = None
         self.root.destroy()
@@ -478,17 +598,15 @@ class _Hud:
         return "break"
 
     def _stop_selected(self, _event=None) -> str:
-        if self.running or not self.filtered:
-            return "break"
-        profile = self.filtered[self.index]
-        if isinstance(profile, Action):
+        profile = self._selected_profile()
+        if self.running or profile is None:
             return "break"
         self.running = True
         self._build_progress(profile, verb="Stopping")
 
         def worker() -> None:
             try:
-                results, stopped, stubborn = stop_profile(profile, self.results_q.put)
+                _results, stopped, stubborn = stop_profile(profile, self.results_q.put)
                 self.results_q.put(
                     _synthetic(profile, f"{stopped} process(es) closed, {stubborn} left")
                 )
@@ -517,15 +635,18 @@ class _Hud:
 
     # ── execution view ───────────────────────────────────────────────────
     def _commit(self, _event=None) -> None:
-        if self.running or not self.filtered:
+        entry = self.selected
+        if self.running or entry is None:
             return
-        selected = self.filtered[self.index]
-        if isinstance(selected, Action):
+        if entry.kind == "action":
             self.chosen = None
             self.root.destroy()
-            selected.run()
+            entry.payload.run()
             return
-        self.chosen = selected
+        if entry.kind == "app":
+            self._launch_app(entry.payload)
+            return
+        self.chosen = entry.payload
         if not self.execute:
             self.root.destroy()
             return
@@ -534,42 +655,51 @@ class _Hud:
         threading.Thread(target=self._worker, args=(self.chosen,), daemon=True).start()
         self.root.after(60, self._poll_results)
 
+    def _launch_app(self, app: App) -> None:
+        """Start one application and close — no progress view worth showing."""
+        from launcher import apps
+
+        if not self.execute:
+            self.root.destroy()
+            return
+        try:
+            detail = apps.launch(app)
+            print(detail)
+        except (LookupError, OSError) as exc:
+            self.footer.configure(text=f"could not launch {app.name}: {exc}", fg=self.pal.err)
+            self.exit_code = 1
+            return
+        self.root.destroy()
+
     def _build_progress(self, profile: Profile, verb: str = "Running") -> None:
-        pal = self.pal
+        pal, kit = self.pal, self.kit
         if self.preview_open:
             self.preview_frame.pack_forget()
             self.preview_open = False
-            self._resize(self.base_width)
+        self._resize(self.base_width, self.max_height)
         for child in self.outer.winfo_children():
             child.destroy()
         self.rows.clear()
 
-        header = tk.Frame(self.outer, bg=pal.bg)
+        header = kit.frame(self.outer)
         header.pack(fill="x")
-        tk.Label(
-            header, text=profile.icon or "◈", bg=pal.bg, fg=pal.accent, font=(self.font, 14)
-        ).pack(side="left", padx=(0, 8))
-        tk.Label(
-            header,
-            text=f"{verb} {profile.name}…",
-            bg=pal.bg,
-            fg=pal.fg,
-            font=(self.font, 14, "bold"),
-        ).pack(side="left")
+        kit.label(header, profile.icon or "▣", fg=pal.accent, size=SIZE_DISPLAY).pack(
+            side="left", padx=(0, theme.METRICS.gap_sm)
+        )
+        kit.label(header, f"{verb} {profile.name}…", size=SIZE_DISPLAY, bold=True).pack(side="left")
 
-        tk.Frame(self.outer, bg=pal.border, height=1).pack(fill="x", pady=(10, 12))
+        kit.divider(self.outer, pady=(theme.METRICS.gap, theme.METRICS.gap))
 
-        self.progress_frame = tk.Frame(self.outer, bg=pal.bg)
+        self.progress_frame = kit.frame(self.outer)
         self.progress_frame.pack(fill="both", expand=True)
 
-        self.status = tk.Label(
+        self.status = kit.label(
             self.outer,
-            text="esc hide window (steps keep running)",
-            bg=pal.bg,
-            fg=pal.muted,
-            font=(self.font, 9),
+            "esc hides the window — the steps keep running",
+            fg=pal.faint,
+            size=SIZE_TINY,
         )
-        self.status.pack(anchor="w", pady=(10, 0))
+        self.status.pack(anchor="w", pady=(theme.METRICS.gap, 0))
         self.root.bind("<Escape>", lambda _e: self.root.destroy())
         self.root.bind("<Return>", lambda _e: None)
 
@@ -585,50 +715,47 @@ class _Hud:
         done = False
         while True:
             try:
-                res = self.results_q.get_nowait()
+                result = self.results_q.get_nowait()
             except queue.Empty:
                 break
-            if res is None:
+            if result is None:
                 done = True
                 break
-            self._add_result_row(res)
-            print(format_result(res))
+            self._add_result_row(result)
+            print(format_result(result))
         if done:
             self._finish()
         else:
             self.root.after(60, self._poll_results)
 
-    def _add_result_row(self, res: StepResult) -> None:
-        pal = self.pal
-        if res.counts_as_failure:
+    def _add_result_row(self, result: StepResult) -> None:
+        pal, kit = self.pal, self.kit
+        if result.counts_as_failure:
             self.failed_count += 1
-        row = tk.Frame(self.progress_frame, bg=pal.bg)
+        row = kit.frame(self.progress_frame)
         row.pack(fill="x", pady=2)
-        if res.skipped:
-            glyph, color = "○", pal.muted
-        elif res.ok:
-            glyph, color = "✓", pal.ok
+        if result.skipped:
+            glyph, colour = "○", pal.faint
+        elif result.ok:
+            glyph, colour = "✓", pal.ok
         else:
-            glyph, color = "✗", pal.err
-        tk.Label(row, text=glyph, bg=pal.bg, fg=color, font=(self.font, 11, "bold"), width=2).pack(
-            side="left"
+            glyph, colour = "✗", pal.err
+        kit.label(row, glyph, fg=colour, size=SIZE_BODY, bold=True, width=2).pack(side="left")
+        kit.label(row, result.step.label, size=SIZE_SMALL, anchor="w").pack(side="left")
+        detail_fg = pal.err if (not result.ok and not result.step.optional) else pal.faint
+        kit.label(row, result.detail[:90], fg=detail_fg, size=SIZE_TINY, anchor="e").pack(
+            side="right"
         )
-        tk.Label(
-            row, text=res.step.label, bg=pal.bg, fg=pal.fg, font=(self.font, 10), anchor="w"
-        ).pack(side="left")
-        detail_fg = pal.err if (not res.ok and not res.step.optional) else pal.muted
-        tk.Label(
-            row, text=res.detail[:90], bg=pal.bg, fg=detail_fg, font=(self.font, 9), anchor="e"
-        ).pack(side="right")
 
     def _finish(self) -> None:
-        failed = self.failed_count
-        if failed == 0:
+        if self.failed_count == 0:
             self.status.configure(text="✓ all steps finished — closing…", fg=self.pal.ok)
             self.exit_code = 0
             self.root.after(1400, self.root.destroy)
         else:
-            self.status.configure(text=f"✗ {failed} step(s) failed — esc to close", fg=self.pal.err)
+            self.status.configure(
+                text=f"✗ {self.failed_count} step(s) failed — esc to close", fg=self.pal.err
+            )
             self.exit_code = 1
 
     def run(self) -> None:
@@ -650,7 +777,7 @@ def pick_and_run(profiles: list[Profile]) -> int:
     """Open the HUD; on Enter, execute the profile with live step feedback.
 
     Opens even with no profiles at all — the Settings row is how a first-time
-    user gets to the panel that creates one.
+    user gets to the manager that creates one.
 
     Returns a process exit code (0 = success / cancelled, 1 = failed steps).
     """
@@ -674,16 +801,3 @@ def toggle_pick_and_run(profiles: list[Profile]) -> int:
         hud.request_close()
         return 0
     return pick_and_run(profiles)
-
-
-def pick_profile(
-    profiles: list[Profile], on_pick: Callable[[Profile], None] | None = None
-) -> Profile | None:
-    """Pick a profile without executing it (legacy API)."""
-    if not profiles:
-        return None
-    hud = _Hud(profiles, execute=False)
-    hud.run()
-    if hud.chosen and on_pick:
-        on_pick(hud.chosen)
-    return hud.chosen

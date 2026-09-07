@@ -346,14 +346,14 @@ def test_settings_opens_the_panel(monkeypatch):
     opened = []
     monkeypatch.setitem(sys.modules, "launcher.panel", _FakePanel(opened))
     assert main(["settings"]) == 0
-    assert opened == ["Settings"]
+    assert opened == ["Launch"]
 
 
 def test_settings_can_open_a_named_section(monkeypatch):
     opened = []
     monkeypatch.setitem(sys.modules, "launcher.panel", _FakePanel(opened))
-    assert main(["settings", "History"]) == 0
-    assert opened == ["History"]
+    assert main(["settings", "Activity"]) == 0
+    assert opened == ["Activity"]
 
 
 def test_settings_rejects_an_unknown_section():
@@ -365,7 +365,7 @@ def test_config_gui_opens_the_panel(monkeypatch):
     opened = []
     monkeypatch.setitem(sys.modules, "launcher.panel", _FakePanel(opened))
     assert main(["config", "gui"]) == 0
-    assert opened == ["Settings"]
+    assert opened == ["Launch"]
 
 
 def test_settings_explains_a_missing_tkinter(monkeypatch, capsys):

@@ -20,54 +20,7 @@ from launcher.config import (
 )
 from launcher.executor import dry_run_profile, format_result, run_profile
 from launcher.notify import notify
-
-# Mirrors launcher.panel.SECTIONS. Duplicated on purpose: importing the panel
-# would drag tkinter into every `palaunch --help`, and a test pins them equal.
-PANEL_SECTIONS = ("Settings", "Profiles", "Secrets", "Sync", "History", "Logs", "Paths")
-
-_NEW_PROFILE_TEMPLATE = """\
-{modeline}
-name: {name}
-description: Describe what this profile sets up
-icon: "\\U0001F680"
-
-# vars are available as {{{{ vars.NAME }}}} anywhere below
-vars:
-  session: {slug}
-
-steps:
-  - type: env
-    set:
-      PAL_SESSION: "{{{{ vars.session }}}}"
-
-  - type: url
-    name: example tab
-    url: https://example.com
-
-  # - type: app
-  #   name: VS Code
-  #   path:
-  #     windows: "%LOCALAPPDATA%\\\\Programs\\\\Microsoft VS Code\\\\Code.exe"
-  #     linux:   /usr/bin/code
-  #   window:
-  #     monitor: 1
-  #     position: left-half
-
-  # - type: command
-  #   name: pull latest
-  #   detach: false
-  #   timeout: 30        # seconds; kill if it runs longer
-  #   retries: 1         # retry once on failure
-  #   retry_delay: 2     # wait 2s, then 4s, then 8s…
-  #   optional: true     # failure doesn't fail the profile
-  #   run: ["git", "pull", "--ff-only"]
-
-# teardown runs on `palaunch stop {name}`
-# teardown:
-#   - type: notify
-#     message: "{name} closed"
-"""
-
+from launcher.panel_model import SECTIONS as PANEL_SECTIONS
 
 # ── helpers ──────────────────────────────────────────────────────────────
 
@@ -273,31 +226,90 @@ def _cmd_validate(args: argparse.Namespace) -> int:
 
 
 def _cmd_new(args: argparse.Namespace) -> int:
-    from launcher import schema
+    from launcher import scaffold
+
+    if args.gui:
+        from launcher.editor import new_profile_dialog
+
+        path = new_profile_dialog()
+        if path is None:
+            print("Cancelled.")
+            return 1
+        print(f"Created {path}")
+        return 0
 
     directory = profiles_dir()
     directory.mkdir(parents=True, exist_ok=True)
-    slug = args.name.lower().replace(" ", "-")
-    path = directory / f"{slug}.yaml"
+    path = scaffold.profile_path(args.name, directory)
     if path.exists():
         print(f"Profile file already exists: {path}", file=sys.stderr)
         return 1
-    schema_file = schema.write()
-    path.write_text(
-        _NEW_PROFILE_TEMPLATE.format(
-            name=args.name, slug=slug, modeline=schema.modeline(schema_file)
-        ),
-        encoding="utf-8",
-    )
-    print(f"Created {path}")
-    if args.gui:
-        from launcher.editor import open_editor
 
-        open_editor(path)
-        return 0
+    described = bool(args.app or args.url or args.close or args.description or args.icon)
+    if described:
+        draft = scaffold.Draft(
+            name=args.name,
+            description=args.description or "",
+            icon=args.icon or "",
+            tags=args.tag or [],
+            apps=args.app or [],
+            urls=args.url or [],
+            close=args.close or [],
+        )
+        try:
+            scaffold.write(draft, path)
+        except (ValueError, OSError) as exc:
+            print(f"Could not create the profile: {exc}", file=sys.stderr)
+            return 1
+    else:
+        path.write_text(scaffold.starter_yaml(args.name), encoding="utf-8")
+    print(f"Created {path}")
     if args.edit:
         return _open_in_editor(path)
-    print(f"Edit it, then try: palaunch run {args.name} --dry-run")
+    print(f"Check it with: palaunch run {args.name} --dry-run")
+    return 0
+
+
+def _cmd_app(args: argparse.Namespace) -> int:
+    """Launch one installed application by name, or list what is installed."""
+    from launcher import apps
+
+    if args.list or not args.name:
+        found = apps.search(args.name, limit=args.limit) if args.name else apps.index(args.refresh)
+        if not found:
+            print("No matching applications.", file=sys.stderr)
+            return 1
+        for app in found[: args.limit]:
+            print(f"  {app.name:<28} {apps.describe(app)[:60]}")
+        return 0
+    try:
+        print(apps.launch(args.name, args.args))
+    except LookupError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    except OSError as exc:
+        print(f"Could not launch: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def _cmd_install(args: argparse.Namespace) -> int:
+    from launcher import install as ops
+
+    if not args.cli:
+        try:
+            from launcher.installer import open_installer
+        except ImportError as exc:
+            print(f"The setup window needs tkinter ({exc}).", file=sys.stderr)
+            print("Run `palaunch install --cli` instead.", file=sys.stderr)
+            return 1
+        return open_installer(uninstall=args.uninstall)
+    if args.uninstall:
+        ops.uninstall()
+        return 0
+    options = ops.Options(autostart=not args.no_autostart)
+    for note in ops.install(options):
+        print(note)
     return 0
 
 
@@ -546,8 +558,8 @@ def _cmd_config(args: argparse.Namespace) -> int:
     return 0
 
 
-def _open_panel(section: str = "Settings") -> int:
-    """Open the configuration panel, or explain why it cannot be opened.
+def _open_panel(section: str = PANEL_SECTIONS[0]) -> int:
+    """Open the manager window, or explain why it cannot be opened.
 
     Some Linux distributions ship Python without tkinter; the failure should
     name the package to install rather than surface an ImportError traceback.
@@ -555,7 +567,7 @@ def _open_panel(section: str = "Settings") -> int:
     try:
         from launcher.panel import open_panel
     except ImportError as exc:
-        print(f"The settings panel needs tkinter ({exc}).", file=sys.stderr)
+        print(f"The manager window needs tkinter ({exc}).", file=sys.stderr)
         print("Debian/Ubuntu: sudo apt install python3-tk", file=sys.stderr)
         print("Meanwhile `palaunch config set <key> <value>` does the same job.", file=sys.stderr)
         return 1
@@ -599,6 +611,16 @@ def _cmd_sync(args: argparse.Namespace) -> int:
     from launcher import settings, sync
 
     try:
+        if args.mirror is not None or args.pull:
+            print(
+                sync.mirror(
+                    args.mirror or "",
+                    pull=args.pull,
+                    delete=not args.no_delete,
+                    dry_run=args.dry_run,
+                )
+            )
+            return 0
         if args.init is not None:
             remote = args.init or settings.load().sync_remote
             directory = sync.init(remote)
@@ -684,11 +706,45 @@ def build_parser() -> argparse.ArgumentParser:
     validate_p.add_argument("--schema", action="store_true", help="Also refresh the JSON Schema")
     validate_p.set_defaults(func=_cmd_validate)
 
-    new_p = sub.add_parser("new", help="Scaffold a new profile YAML")
+    new_p = sub.add_parser("new", help="Create a profile")
     new_p.add_argument("name", help="Profile display name")
+    new_p.add_argument("--description", help="One line about what it sets up")
+    new_p.add_argument("--icon", help="Emoji shown in the launcher")
+    new_p.add_argument("--tag", action="append", default=[], help="Tag (repeatable)")
+    new_p.add_argument(
+        "--app",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="Application to open (repeatable)",
+    )
+    new_p.add_argument(
+        "--url", action="append", default=[], metavar="URL", help="Page to open (repeatable)"
+    )
+    new_p.add_argument(
+        "--close",
+        action="append",
+        default=[],
+        metavar="PROCESS",
+        help="Process to close first (repeatable)",
+    )
     new_p.add_argument("--edit", action="store_true", help="Open it in your editor")
-    new_p.add_argument("--gui", action="store_true", help="Open it in the graphical editor")
+    new_p.add_argument("--gui", action="store_true", help="Use the graphical wizard")
     new_p.set_defaults(func=_cmd_new)
+
+    app_p = sub.add_parser("app", help="Launch one installed application by name")
+    app_p.add_argument("name", nargs="?", help="Application name; omit to list what is installed")
+    app_p.add_argument("args", nargs="*", help="Arguments passed to the application")
+    app_p.add_argument("--list", action="store_true", help="List matches instead of launching")
+    app_p.add_argument("--refresh", action="store_true", help="Rebuild the application index")
+    app_p.add_argument("--limit", type=int, default=20, help="How many to list")
+    app_p.set_defaults(func=_cmd_app)
+
+    install_p = sub.add_parser("install", help="Open the setup window (install or uninstall)")
+    install_p.add_argument("--uninstall", action="store_true", help="Remove what setup created")
+    install_p.add_argument("--cli", action="store_true", help="Run without opening a window")
+    install_p.add_argument("--no-autostart", action="store_true", help="Skip the login entry")
+    install_p.set_defaults(func=_cmd_install)
 
     edit_p = sub.add_parser("edit", help="Open a profile (or the profiles dir) in your editor")
     edit_p.add_argument("name", nargs="?", help="Profile name; opens the folder if omitted")
@@ -733,16 +789,16 @@ def build_parser() -> argparse.ArgumentParser:
     set_p.add_argument("key")
     set_p.add_argument("value")
     config_sub.add_parser("path", help="Print the settings file path")
-    config_sub.add_parser("gui", help="Open the graphical configuration panel")
+    config_sub.add_parser("gui", help="Open the manager window")
     config_p.set_defaults(func=_cmd_config, config_cmd="list")
 
-    settings_p = sub.add_parser("settings", help="Open the graphical configuration panel")
+    settings_p = sub.add_parser("settings", help="Open the manager window")
     settings_p.add_argument(
         "section",
         nargs="?",
-        default="Settings",
+        default=PANEL_SECTIONS[0],
         choices=list(PANEL_SECTIONS),
-        help="Which page to open (default: Settings)",
+        help=f"Which page to open (default: {PANEL_SECTIONS[0]})",
     )
     settings_p.set_defaults(func=_cmd_settings)
 
@@ -756,7 +812,7 @@ def build_parser() -> argparse.ArgumentParser:
     secret_sub.add_parser("list", help="List known secret names")
     secret_p.set_defaults(func=_cmd_secret, secret_cmd="list")
 
-    sync_p = sub.add_parser("sync", help="Sync the profiles directory through git")
+    sync_p = sub.add_parser("sync", help="Sync the profiles directory (git or rsync)")
     sync_p.add_argument(
         "--init",
         nargs="?",
@@ -767,6 +823,16 @@ def build_parser() -> argparse.ArgumentParser:
     sync_p.add_argument("--status", action="store_true", help="Show repo status and exit")
     sync_p.add_argument("-m", "--message", default="", help="Commit message")
     sync_p.add_argument("--no-push", action="store_true", help="Commit and rebase, don't push")
+    sync_p.add_argument(
+        "--mirror",
+        nargs="?",
+        const="",
+        metavar="TARGET",
+        help="rsync the profiles to a folder or user@host:/path instead of using git",
+    )
+    sync_p.add_argument("--pull", action="store_true", help="Mirror back from the target")
+    sync_p.add_argument("--no-delete", action="store_true", help="Keep files the source removed")
+    sync_p.add_argument("--dry-run", action="store_true", help="Report the mirror, change nothing")
     sync_p.set_defaults(func=_cmd_sync)
 
     schema_p = sub.add_parser("schema", help="Write the JSON Schema for profile files")
