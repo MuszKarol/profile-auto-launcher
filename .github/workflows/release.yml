@@ -78,7 +78,7 @@ jobs:
         with:
           subject-path: "dist/*"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: python-dist
           path: dist/*
@@ -190,6 +190,31 @@ jobs:
           }
           Remove-Item $pfx -Force
 
+      # ── the Windows installer ──────────────────────────────────────────
+      # Inno Setup wraps the two frozen binaries into a real setup.exe with a
+      # wizard, shortcuts, an entry in "Apps & features" and an uninstaller.
+      - name: Build the Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --no-progress -y
+          }
+          if (-not (Test-Path $iscc)) { throw "Inno Setup not found at $iscc" }
+          & $iscc "/DVersion=${{ needs.verify.outputs.version }}" packaging\palaunch.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit $LASTEXITCODE" }
+          Get-ChildItem dist-installer
+
+      - name: Smoke-test the installer package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist-installer\palaunch-setup-*.exe | Select-Object -First 1
+          if (-not $setup) { throw "no installer was produced" }
+          if ($setup.Length -lt 1MB) { throw "installer looks empty: $($setup.Length) bytes" }
+          Move-Item $setup.FullName .
+
       # ── package ────────────────────────────────────────────────────────
       - name: Package
         shell: bash
@@ -207,7 +232,9 @@ jobs:
             tar -czf "$name.tar.gz" -C staging "$name"
           fi
           # Checksums let anyone verify a download without the GitHub API.
-          for archive in "$name".*; do
+          # The Windows installer is built beside the archive, not inside it.
+          for archive in "$name".* palaunch-setup-*.exe; do
+            [ -e "$archive" ] || continue
             if command -v sha256sum > /dev/null; then
               sha256sum "$archive" > "$archive.sha256"
             else
@@ -218,14 +245,15 @@ jobs:
       - name: Attest provenance
         uses: actions/attest-build-provenance@v2
         with:
-          subject-path: "palaunch-*.tar.gz,palaunch-*.zip"
+          subject-path: "palaunch-*.tar.gz,palaunch-*.zip,palaunch-setup-*.exe"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: binary-${{ matrix.label }}
           path: |
             palaunch-*.tar.gz
             palaunch-*.zip
+            palaunch-setup-*.exe
             palaunch-*.sha256
 
   pypi:
@@ -278,11 +306,17 @@ jobs:
           {
             echo "## Install"
             echo
+            echo "**Windows** — download \`palaunch-setup-$version.exe\` below and run it."
+            echo "It installs per-user, adds the Start Menu shortcut and can start the"
+            echo "launcher at sign-in. No administrator rights needed."
+            echo
+            echo "**Linux and macOS** — download the archive for your platform and run"
+            echo "\`./palaunch install\` from it for the same setup window, or:"
+            echo
             echo '```bash'
             echo "pip install profile-auto-launcher==$version"
+            echo "palaunch install"
             echo '```'
-            echo
-            echo "Or download a self-contained binary below — no Python needed."
             echo
             echo "## Verify a download"
             echo

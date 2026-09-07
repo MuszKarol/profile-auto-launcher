@@ -87,10 +87,23 @@ jobs:
           palaunch validate
           palaunch run "CI Check" --dry-run
           palaunch config list
-          palaunch config set theme dark
-          test "$(palaunch config get theme)" = "dark"
+          palaunch config set theme light
+          test "$(palaunch config get theme)" = "light"
+          # The application index and the rsync mirror have no GUI in the way,
+          # so they are checked on every runner rather than only on Linux.
+          palaunch app --list --limit 5
+          palaunch new "Mirrored" --app python --url https://example.com
+          palaunch sync --mirror "$RUNNER_TEMP/pal-mirror"
+          test -f "$RUNNER_TEMP/pal-mirror/ci-check.yaml"
+          palaunch sync --mirror "$RUNNER_TEMP/pal-mirror" --dry-run
 
-      - uses: actions/upload-artifact@v4
+      - name: Smoke-test the installer without a window
+        shell: bash
+        run: |
+          palaunch install --cli --no-autostart
+          palaunch install --cli --uninstall
+
+      - uses: actions/upload-artifact@v5
         if: failure()
         with:
           name: results-${{ matrix.os }}-py${{ matrix.python }}
@@ -122,6 +135,22 @@ jobs:
         env:
           PAL_INCLUDE_CWD: "1"
         run: palaunch validate
+
+  assets:
+    name: Icons match the code that draws them
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install -e .
+      # assets/ is generated, and the installers ship it. Regenerating it here
+      # is what stops the committed icon from drifting away from the source.
+      - run: python -m launcher.branding assets
+      - name: The committed assets are the generated ones
+        run: git diff --exit-code -- assets
 
   package:
     name: Package builds and installs clean

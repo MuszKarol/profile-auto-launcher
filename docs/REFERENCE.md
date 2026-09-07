@@ -40,7 +40,7 @@ running.
 | Module                 | Responsibility                                           |
 |------------------------|----------------------------------------------------------|
 | `launcher.config`      | Discover / parse YAML profiles, per-platform overrides, schema validation |
-| `launcher.executor`    | Async DAG step runner, 13 step types, retries, teardown  |
+| `launcher.executor`    | Async DAG step runner, 14 step types, retries, teardown  |
 | `launcher.conditions`  | `when:` evaluation (platform, time, process, wifi, battery…) |
 | `launcher.interp`      | `{{ … }}` templating over vars, env, time, host, secrets |
 | `launcher.secrets`     | OS credential store (Keychain / Credential Manager / libsecret) |
@@ -48,17 +48,26 @@ running.
 | `launcher.windows`     | Window placement: user32, wmctrl/xdotool, AppleScript, virtual desktops |
 | `launcher.wayland`     | Wayland placement per compositor (Sway / Hyprland / KWin) |
 | `launcher.scheduler`   | Time-based `triggers:` while the tray runs               |
-| `launcher.hud`         | Tk HUD picker with live step results — stdlib only       |
-| `launcher.editor`      | Graphical profile/step editor                            |
-| `launcher.panel`       | Graphical configuration panel — settings, profiles, secrets, sync, history, logs, paths |
-| `launcher.panel_model` | The panel's rules and reports, with no Tk in sight (so they are tested headlessly) |
+| `launcher.apps`        | Installed-application index (.desktop / Start Menu / bundles / PATH) and single-app launching |
+| `launcher.fuzzy`       | The one ranking rule every search box uses               |
+| `launcher.mirror`      | rsync-style directory mirroring, with a built-in fallback |
+| `launcher.scaffold`    | Answers → a valid profile file (the wizard and `palaunch new`) |
+| `launcher.branding`    | The app mark, drawn to PNG/ICO/SVG in pure Python        |
+| `launcher.theme`       | Palette, spacing and font tokens — dark by default       |
+| `launcher.ui`          | The widget kit all three windows are built from          |
+| `launcher.hud`         | The launcher window: profiles, apps and actions in one list |
+| `launcher.editor`      | The new-profile wizard and the step editor               |
+| `launcher.panel`       | The manager window — launch, profiles, sync, activity, settings |
+| `launcher.panel_model` | The manager's rules and reports, with no Tk in sight (so they are tested headlessly) |
+| `launcher.install`     | What setup does: profiles, schema, shortcuts, login item |
+| `launcher.installer`   | The setup window that drives `launcher.install`          |
 | `launcher.record`      | Watches what you launch, writes it out as a profile      |
 | `launcher.tray`        | System tray, self-refreshing menu (pystray/Pillow)       |
 | `launcher.hotkey`      | Global + per-profile hotkeys (pynput)                    |
 | `launcher.settings`    | `settings.yaml` with `PAL_*` env overrides               |
 | `launcher.state`       | Run history, per-step timings, flakiness stats           |
 | `launcher.logging_setup` | Rotating log — the only diagnostics `palaunchw` has    |
-| `launcher.sync`        | Git sync of the profiles directory                       |
+| `launcher.sync`        | Git sync and rsync mirroring of the profiles directory   |
 | `launcher.schema`      | JSON Schema generation for editor autocomplete           |
 | `launcher.sysprobe`    | Process / Wi-Fi / battery probes (psutil when available) |
 | `launcher.notify`      | Native desktop notifications                             |
@@ -88,8 +97,8 @@ Other execution properties:
 
 ### OS integration
 
-- **Autostart:** systemd user unit or `.desktop` (Linux), Startup shortcut
-  (Windows), LaunchAgent (macOS).
+- **Autostart:** an XDG `.desktop` entry (Linux), a Startup shortcut
+  (Windows), a LaunchAgent (macOS) — all written by `palaunch install`.
 - **Global hotkeys:** `pynput.keyboard.GlobalHotKeys`.
 - **System tray:** `pystray.Icon`, menu rebuilt on profile/state change.
 - **Secrets:** `keyring` → Keychain / Credential Manager / libsecret.
@@ -132,8 +141,9 @@ Other execution properties:
 - [x] YAML profile schema with per-platform command/app/path overrides
 - [x] Async DAG executor: implicit ordering, `parallel: true` batches,
       explicit `depends_on`, `max_parallel`
-- [x] 13 step types — `app`, `command`, `script`, `url`, `env`, `kill`,
-      `wait`, `wait_for`, `profile`, `notify`, `http`, `plugin`, `file`
+- [x] 14 step types — `app`, `command`, `script`, `url`, `env`, `kill`,
+      `wait`, `wait_for`, `profile`, `notify`, `http`, `plugin`, `file`,
+      `rsync`
 - [x] Per-step `enabled` / `optional` / `timeout` / `retries` / `retry_delay`
       / `on_failure`
 - [x] Conditional steps — `when: {platform, exists, not_exists, env, weekday,
@@ -152,13 +162,20 @@ Other execution properties:
 - [x] `palaunch status` — what's running, and what it last did
 
 **Interface**
-- [x] HUD picker — fuzzy filter, live per-step results, step preview,
-      light/dark theme following the desktop, running-profile badge
-- [x] Graphical profile editor (`palaunch edit <name> --gui`)
-- [x] Graphical configuration panel (`palaunch settings`, the HUD's **Settings**
-      row, `Ctrl+,`, or the tray's *Settings…*) covering every setting,
-      profile action, secret, sync operation, history view, log tail and path
-      the CLI exposes
+- [x] Launcher window — fuzzy filter over profiles *and* installed
+      applications, live per-step results, step preview, running-profile
+      badge, sized to its results
+- [x] Launching a single application by name, from the launcher, the manager
+      or `palaunch app <name>` — tracked, so `palaunch stop` still applies
+- [x] New-profile wizard: presets, an app picker, pages and processes to
+      close, validated before anything is written
+- [x] Graphical step editor (`palaunch edit <name> --gui`)
+- [x] Manager window (`palaunch settings`, `Ctrl+,`, or the tray) on five
+      pages — Launch, Profiles, Sync, Activity, Settings — covering every
+      setting, profile action, secret, sync operation, history view, log tail
+      and path the CLI exposes
+- [x] Dark by default, with a light palette and an `auto` mode that follows
+      the desktop
 - [x] System tray with a self-refreshing menu and a Stop submenu
 - [x] Global hotkey + per-profile hotkeys
 - [x] Native desktop notifications
@@ -169,9 +186,13 @@ Other execution properties:
 - [x] Run history with per-step timings + `palaunch history [--stats]`
 - [x] `settings.yaml` + `palaunch config get/set/list` + `palaunch config gui`
 - [x] Time-based `triggers:` evaluated by the tray
-- [x] Git sync of the profiles directory (`palaunch sync`)
+- [x] Git sync of the profiles directory (`palaunch sync`), and an rsync
+      mirror to a folder, a drive or `user@host:/path` (`palaunch sync --mirror`)
 - [x] JSON Schema + `# yaml-language-server:` modeline for editor autocomplete
-- [x] "Run on boot" installers for systemd / XDG / Startup / LaunchAgent
+- [x] A graphical setup wizard (`palaunch install`) that copies the sample
+      profiles, writes the schema, adds a menu entry, registers the login item
+      — and undoes all of it (`palaunch install --uninstall`)
+- [x] A real Windows installer (Inno Setup) built by the release workflow
 - [x] Window placement (`window:` on `app`/`command` steps) on Windows, X11,
       Wayland (Sway / Hyprland / KWin) and macOS
 - [x] Virtual desktops / Spaces via `workspace:` on every platform that
@@ -235,7 +256,7 @@ otherwise fan out to every derived profile.
 
 ```yaml
 - type: app | command | script | url | env | kill | wait | wait_for
-      | profile | notify | http | plugin | file
+      | profile | notify | http | plugin | file | rsync
   name: "human label"     # shown in the HUD and logs
   id: docker              # referenced by depends_on
   enabled: true           # false → reported as SKIP, never run
@@ -326,6 +347,14 @@ otherwise fan out to every derived profile.
   plugin: "~/.config/profile-auto-launcher/plugins/hello_plugin.py"
   config: {message: "wrapped up at {{ time }}"}
 
+# Mirror a directory — rsync when it is installed, built-in otherwise
+- type: rsync
+  src: "~/notes"
+  dest: "nas:/volume1/notes"     # a path, a drive, or user@host:/path
+  delete: true                   # remove what the source no longer has
+  exclude: ["*.tmp", ".git"]
+  backend: auto                  # auto | rsync | builtin
+
 # File operations — config swapping between contexts
 - type: file
   action: copy | symlink | mkdir | remove | write | append
@@ -381,7 +410,7 @@ palaunch secret set ha_token          # prompts without echo
 
 ```bash
 palaunch config list
-palaunch config set theme dark        # auto | dark | light
+palaunch config set theme light       # dark | light | auto
 palaunch config set max_parallel 4
 palaunch config path
 ```
@@ -389,7 +418,7 @@ palaunch config path
 | Key | Default | Meaning |
 |-----|---------|---------|
 | `hotkey` | `<alt>+<space>` | HUD shortcut |
-| `theme` | `auto` | HUD/editor palette; `auto` follows the desktop |
+| `theme` | `dark` | palette for every window; `auto` follows the desktop |
 | `notifications` | `true` | desktop toasts |
 | `log_level` / `log_max_bytes` / `log_backups` | `INFO` / 1 MB / 3 | rotating log |
 | `history_limit` | `500` | runs kept in `history.jsonl` |
@@ -397,8 +426,9 @@ palaunch config path
 | `editor` | *(unset)* | overrides `$EDITOR` for `palaunch edit` |
 | `scheduler` | `true` | honour `triggers:` while the tray runs |
 | `window_management` | `true` | apply `window:` blocks |
-| `hud_width` / `hud_height` | 620 / 420 | HUD size |
+| `hud_width` / `hud_height` | 680 / 540 | launcher size (it shrinks to fit fewer results) |
 | `sync_remote` | *(unset)* | git remote for `palaunch sync` |
+| `sync_mirror` | *(unset)* | rsync target for `palaunch sync --mirror` |
 
 Any `PAL_*` environment variable of the same name wins over the file, so
 `PAL_THEME=light palaunch pick` still works for one-off overrides.
@@ -458,7 +488,8 @@ for i, step in enumerate(steps):
 |--------|-----|
 | **Python 3.10+** | Ships on macOS/Linux, trivial on Windows; `asyncio` and `subprocess` cover every launch mode we need. |
 | **YAML profiles** | Editable by hand, diffable in git, and a JSON Schema gives autocomplete without writing an editor plugin. |
-| **Tkinter for the HUD** | Standard library. A launcher you install to save time should not pull a GUI toolkit first. |
+| **Tkinter for every window** | Standard library. A launcher you install to save time should not pull a GUI toolkit first. `launcher.ui` supplies the widgets Tk lacks, so the windows still look like this decade. |
+| **The icon is code** | `launcher.branding` draws the mark to PNG, ICO and SVG in pure Python, so the tray, the window icons, the installers and the README cannot drift apart — and CI checks the committed files still match. |
 | **asyncio, not threads** | Steps are almost entirely I/O — spawning, polling ports, waiting on HTTP. One event loop keeps ordering explicit and cancellation sane. |
 | **Optional extras** | pystray, pynput, keyring and psutil are all optional; every integration degrades to a logged message instead of an ImportError. |
 | **platformdirs** | The config path differs on all three platforms and guessing it wrong is how profiles end up undiscovered. |
@@ -468,16 +499,35 @@ for i, step in enumerate(steps):
 
 ## 6. Install & run
 
-### Linux
+### The setup wizard
 
 ```bash
-bash scripts/install-linux.sh              # install + XDG autostart
-bash scripts/install-linux.sh --systemd    # …or a systemd user unit
-bash scripts/install-linux.sh --no-autostart
-bash scripts/uninstall-linux.sh
+palaunch install              # the window: options, progress, what it did
+palaunch install --cli        # the same operations without a window
+palaunch install --uninstall  # remove them again; profiles are kept
 ```
 
-### Windows
+Setup is `launcher.install`, and it is deliberately small: copy the sample
+profiles (never overwriting one you edited), write the JSON Schema, put the
+icon where a shortcut can point at it, add a menu entry, and register the
+login item — an XDG `.desktop` file, a LaunchAgent, or a Start Menu shortcut,
+depending on the platform. Everything lands under your user account, so no
+installation needs administrator rights.
+
+On Windows the release also ships `palaunch-setup-<version>.exe`, an Inno
+Setup package built from `packaging/palaunch.iss`. It carries the frozen
+binaries, registers an entry in "Apps & features", and calls
+`palaunch install --cli` for the profile setup, so the two paths do the same
+thing.
+
+### Scripted installs
+
+```bash
+bash scripts/install-linux.sh              # pip install + palaunch install --cli
+bash scripts/install-linux.sh --no-autostart
+bash scripts/install-linux.sh --gui        # …or open the setup window
+bash scripts/uninstall-linux.sh
+```
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\install-windows.ps1
@@ -485,19 +535,22 @@ powershell -ExecutionPolicy Bypass -File scripts\install-windows.ps1 -NoAutostar
 powershell -ExecutionPolicy Bypass -File scripts\uninstall-windows.ps1
 ```
 
+The scripts install the package and then call `palaunch install`, so a shell
+script and the window can never register different things.
+
 ### Manual / development
 
 ```bash
 pip install -e ".[full,dev]"     # everything, including test tooling
 pip install -e .                 # core only: CLI + HUD, no tray/hotkey
-pytest                           # 300+ tests
+pytest                           # 380+ tests
 ruff check src tests
 ```
 
 Extras: `tray` (pystray + Pillow), `hotkey` (pynput), `secrets` (keyring),
 `probe` (psutil — faster process/Wi-Fi/battery probes), `full`, `dev`.
 
-The HUD, the profile editor and the settings panel are Tkinter, which ships
+The launcher, the editor, the manager and the setup wizard are Tkinter, which ships
 with CPython — except on distributions that split it out. On Debian/Ubuntu
 that is `sudo apt install python3-tk`; without it the CLI still does
 everything, and says so instead of failing with an ImportError.
@@ -517,7 +570,7 @@ both macOS architectures. Each archive holds `palaunch`, the console-free
 ```bash
 # verify a download came from this repository's CI
 sha256sum -c SHA256SUMS.txt --ignore-missing
-gh attestation verify palaunch-0.3.0-linux-x86_64.tar.gz --repo MuszKarol/profile-auto-launcher
+gh attestation verify palaunch-1.0.0-linux-x86_64.tar.gz --repo MuszKarol/profile-auto-launcher
 ```
 
 Building one yourself:
@@ -538,7 +591,9 @@ palaunch run Dev             # run a profile by name (or the default)
 palaunch run Dev --dry-run   # describe every step, execute nothing
 palaunch run Dev --only "VS Code" --skip docker    # partial runs, for debugging
 palaunch last                # re-run whatever you ran last time
-palaunch pick                # HUD picker with fuzzy filter and live progress
+palaunch pick                # the launcher window: fuzzy filter, live progress
+palaunch app firefox         # launch one installed application by name
+palaunch app --list web      # …or see what matches first
 palaunch tray                # tray + hotkeys + trigger scheduler
 
 # lifecycle
@@ -550,6 +605,7 @@ palaunch switch Gaming       # stop everything else, then run Gaming
 # authoring
 palaunch record "My Setup"   # watch what you open, write it out as a profile
 palaunch new Gaming [--edit|--gui]
+palaunch new Desk --app code --app firefox --url http://localhost:3000
 palaunch edit Dev [--gui]    # $EDITOR, or the graphical step editor
 palaunch validate [--schema] # lint every profile, non-zero exit on errors
 palaunch schema              # (re)write profile.schema.json
@@ -559,10 +615,14 @@ palaunch logs -n 100 -f      # rotating launcher log
 palaunch history [--stats]   # past runs; --stats ranks slow and flaky steps
 palaunch config set theme dark
 palaunch settings            # the whole of the above in one window
-palaunch settings History    # …opened on a particular page
+palaunch settings Activity   # …opened on a particular page
+palaunch install             # the setup wizard
 palaunch secret set ha_token
 palaunch sync --init git@github.com:you/palaunch-profiles.git
 palaunch sync -m "add evening profile"
+palaunch sync --mirror /mnt/usb/profiles      # rsync push
+palaunch sync --mirror nas:/volume1/profiles --dry-run
+palaunch sync --mirror /mnt/usb/profiles --pull
 palaunch where               # every path and hotkey the launcher uses
 ```
 
