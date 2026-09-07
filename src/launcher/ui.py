@@ -21,6 +21,27 @@ from launcher.theme import SIZE_BODY, SIZE_SMALL, SIZE_TINY, SIZE_TITLE
 BUTTON_KINDS = ("primary", "ghost", "quiet", "danger")
 
 
+def new_window(parent: tk.Misc | None) -> tk.Misc:
+    """A Toplevel when a window already exists, a root when none does.
+
+    Tk allows one root per process and dislikes being asked for a second —
+    on macOS a fresh root after an earlier one has been destroyed can take the
+    whole interpreter down. Every window here therefore takes an optional
+    parent, so a process that already has a window nests inside it.
+    """
+    return tk.Toplevel(parent) if parent is not None else tk.Tk()
+
+
+def show_window(window: tk.Misc, parent: tk.Misc | None) -> None:
+    """Block until the window closes: its own loop, or the parent's."""
+    if parent is None:
+        window.mainloop()
+        return
+    window.transient(parent)  # type: ignore[arg-type]
+    window.grab_set()
+    window.wait_window()
+
+
 class Kit:
     """Palette, fonts and widget factories for one window."""
 

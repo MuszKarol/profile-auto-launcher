@@ -17,7 +17,7 @@ import tkinter as tk
 from pathlib import Path
 
 from launcher import install as ops
-from launcher import panel_model, theme
+from launcher import panel_model, theme, ui
 from launcher.theme import SIZE_BODY, SIZE_DISPLAY, SIZE_SMALL, SIZE_TINY
 from launcher.ui import Kit
 
@@ -34,7 +34,7 @@ class _Installer:
         self.notes: list[str] = []
         self.page = 0
 
-        self.root = tk.Toplevel(parent) if parent is not None else tk.Tk()
+        self.root = ui.new_window(parent)
         title = "Uninstall Profile Auto Launcher" if uninstall else "Install Profile Auto Launcher"
         self.kit.chrome(self.root, title)
         self.root.geometry("620x520")
@@ -285,12 +285,7 @@ class _Installer:
 
     # ── lifecycle ────────────────────────────────────────────────────────
     def run(self) -> None:
-        if self.parent is None:
-            self.root.mainloop()
-            return
-        self.root.transient(self.parent)  # type: ignore[arg-type]
-        self.root.grab_set()
-        self.root.wait_window()
+        ui.show_window(self.root, self.parent)
 
 
 def open_installer(parent: tk.Misc | None = None, uninstall: bool = False) -> int:

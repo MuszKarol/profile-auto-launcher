@@ -18,7 +18,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from launcher import fuzzy, theme
+from launcher import fuzzy, theme, ui
 from launcher.apps import App
 from launcher.config import Profile
 from launcher.executor import (
@@ -70,13 +70,17 @@ class Row:
     badge: tuple[str, str] | None = None
 
 
-def default_actions() -> list[Action]:
-    """The actions every HUD offers. Kept a function so tests can substitute."""
+def default_actions(hud: _Hud | None = None) -> list[Action]:
+    """The actions every HUD offers. Kept a function so tests can substitute.
+
+    Given the launcher it belongs to, the manager opens as a child of it —
+    one Tk root per process, however many windows the user walks through.
+    """
 
     def open_manager() -> None:
         from launcher.panel import open_panel
 
-        open_panel()
+        open_panel(parent=hud.root if hud is not None else None)
 
     return [
         Action(
@@ -109,6 +113,7 @@ class _Hud:
         profiles: list[Profile],
         execute: bool,
         actions: list[Action] | None = None,
+        parent: tk.Misc | None = None,
     ) -> None:
         from launcher import settings
 
@@ -119,7 +124,7 @@ class _Hud:
         self.mono = self.kit.mono
 
         self.profiles = profiles
-        self.actions = list(actions if actions is not None else default_actions())
+        self.actions = list(actions if actions is not None else default_actions(self))
         self.execute = execute
         self.filtered: list[Row] = []
         self.index = 0
@@ -139,7 +144,8 @@ class _Hud:
         self._close_event = threading.Event()
         self.results_q: queue.Queue[StepResult | None] = queue.Queue()
 
-        self.root = tk.Tk()
+        self.parent = parent
+        self.root = ui.new_window(parent)
         self.root.withdraw()
         self.kit.chrome(self.root, "Profile Auto Launcher")
         # The border is the window's only frame: overrideredirect removes the
@@ -590,12 +596,27 @@ class _Hud:
         profile = self._selected_profile()
         if self.running or profile is None:
             return "break"
-        self.chosen = None
-        self.root.destroy()
         from launcher.editor import edit_profile
 
-        edit_profile(profile)
+        self._hand_over(lambda: edit_profile(profile, parent=self.root))
         return "break"
+
+    def _hand_over(self, open_window: Callable[[], None]) -> None:
+        """Give way to another window without closing first.
+
+        Destroying the launcher and then opening the next window would ask Tk
+        for a second root, which it tolerates badly and macOS not at all. The
+        launcher hides instead, and closes once the other window is done.
+        """
+        self.chosen = None
+        try:
+            self.root.withdraw()
+            open_window()
+        finally:
+            try:
+                self.root.destroy()
+            except tk.TclError:
+                pass
 
     def _stop_selected(self, _event=None) -> str:
         profile = self._selected_profile()
@@ -624,9 +645,7 @@ class _Hud:
         action = next((a for a in self.actions if a.name == "Settings"), None)
         if action is None:
             return "break"
-        self.chosen = None
-        self.root.destroy()
-        action.run()
+        self._hand_over(action.run)
         return "break"
 
     def _cancel(self, _event=None) -> None:
@@ -639,9 +658,7 @@ class _Hud:
         if self.running or entry is None:
             return
         if entry.kind == "action":
-            self.chosen = None
-            self.root.destroy()
-            entry.payload.run()
+            self._hand_over(entry.payload.run)
             return
         if entry.kind == "app":
             self._launch_app(entry.payload)
@@ -759,7 +776,7 @@ class _Hud:
             self.exit_code = 1
 
     def run(self) -> None:
-        self.root.mainloop()
+        ui.show_window(self.root, self.parent)
 
 
 def _synthetic(profile: Profile, detail: str) -> StepResult:
@@ -773,7 +790,7 @@ _active_lock = threading.Lock()
 _active_hud: _Hud | None = None
 
 
-def pick_and_run(profiles: list[Profile]) -> int:
+def pick_and_run(profiles: list[Profile], parent: tk.Misc | None = None) -> int:
     """Open the HUD; on Enter, execute the profile with live step feedback.
 
     Opens even with no profiles at all — the Settings row is how a first-time
@@ -782,7 +799,7 @@ def pick_and_run(profiles: list[Profile]) -> int:
     Returns a process exit code (0 = success / cancelled, 1 = failed steps).
     """
     global _active_hud
-    hud = _Hud(profiles, execute=True)
+    hud = _Hud(profiles, execute=True, parent=parent)
     with _active_lock:
         _active_hud = hud
     try:
