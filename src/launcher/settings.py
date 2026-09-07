@@ -28,6 +28,7 @@ _ENV_OVERRIDES: dict[str, tuple[str, Any]] = {
     "PAL_MAX_PARALLEL": ("max_parallel", int),
     "PAL_EDITOR": ("editor", str),
     "PAL_SYNC_REMOTE": ("sync_remote", str),
+    "PAL_SYNC_MIRROR": ("sync_mirror", str),
 }
 
 
@@ -40,7 +41,7 @@ def _as_bool(value: Any) -> bool:
 @dataclass
 class Settings:
     hotkey: str = "<alt>+<space>"
-    theme: str = "auto"  # auto | dark | light
+    theme: str = "dark"  # dark | light | auto (follow the desktop)
     notifications: bool = True
     log_level: str = "INFO"
     log_max_bytes: int = 1_000_000
@@ -50,10 +51,11 @@ class Settings:
     editor: str = ""  # empty -> $EDITOR / $VISUAL / OS default
     confirm_stop: bool = False
     sync_remote: str = ""
+    sync_mirror: str = ""  # rsync destination for `palaunch sync --mirror`
     scheduler: bool = True  # honour profile `triggers:` while the tray runs
     window_management: bool = True
-    hud_width: int = 620
-    hud_height: int = 420
+    hud_width: int = 680
+    hud_height: int = 540
     extra: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:

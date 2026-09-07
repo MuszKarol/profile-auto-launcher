@@ -30,6 +30,7 @@ KNOWN_STEP_TYPES = frozenset(
         "http",
         "plugin",
         "file",
+        "rsync",
     }
 )
 
@@ -46,6 +47,7 @@ REQUIRED_STEP_FIELDS: dict[str, tuple[str, ...]] = {
     "http": ("url",),
     "plugin": ("plugin",),
     "file": ("action",),
+    "rsync": ("src",),
 }
 
 KNOWN_PROFILE_KEYS = frozenset(
@@ -214,6 +216,10 @@ class Step:
     src: str | None = None
     dest: str | None = None
     content: str | None = None
+    # type=rsync
+    delete: bool = False  # remove files the source no longer has
+    exclude: list[str] = field(default_factory=list)
+    backend: str = "auto"  # auto | rsync | builtin
 
     @property
     def label(self) -> str:
@@ -230,7 +236,7 @@ class Step:
 class Profile:
     name: str
     description: str = ""
-    icon: str = ""  # short glyph/emoji shown in the HUD and tray
+    icon: str = ""  # accepted for older profiles; the interface draws no icons
     default: bool = False
     autostart: bool = False  # `palaunch tray` runs this profile once at startup
     tags: list[str] = field(default_factory=list)
@@ -306,6 +312,14 @@ def _coerce_step(raw: dict[str, Any]) -> Step:
     raw_set = raw.get("set") or {}
     step.set = {str(k): str(v) for k, v in raw_set.items()}
     step.unset = [str(k) for k in (raw.get("unset") or [])]
+    step.delete = bool(raw.get("delete", False))
+    step.exclude = [str(pattern) for pattern in _as_list(raw.get("exclude"))]
+    step.backend = str(raw.get("backend", "auto")).lower()
+    if step.type == "rsync":
+        if step.backend not in ("auto", "rsync", "builtin"):
+            raise ValueError(f"unknown rsync backend {step.backend!r}; use auto, rsync or builtin")
+        if not step.dest:
+            raise ValueError("step type 'rsync' requires 'dest'")
     if step.action is not None:
         step.action = str(step.action).lower()
         if step.action not in KNOWN_FILE_ACTIONS:

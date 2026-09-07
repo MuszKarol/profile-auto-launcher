@@ -19,13 +19,10 @@ WATCH_SECONDS = 4.0
 
 
 def _icon_image():
-    from PIL import Image, ImageDraw
+    """The app mark, drawn by `launcher.branding` so every surface matches."""
+    from launcher import branding
 
-    img = Image.new("RGB", (64, 64), color=(16, 18, 22))
-    draw = ImageDraw.Draw(img)
-    draw.rectangle([14, 14, 50, 50], outline=(106, 169, 255), width=3)
-    draw.rectangle([22, 22, 42, 42], fill=(106, 169, 255))
-    return img
+    return branding.tray_image(64)
 
 
 def _profiles_signature() -> tuple:
@@ -80,7 +77,7 @@ def run_tray(
         threading.Thread(target=target, args=args, daemon=True).start()
 
     def label(profile: Profile) -> str:
-        return f"{profile.icon} {profile.name}" if profile.icon else profile.name
+        return profile.name
 
     def open_settings() -> None:
         if on_settings is not None:
@@ -118,7 +115,7 @@ def run_tray(
             by_name = {p.name: p for p in current}
             stop_items = [
                 pystray.MenuItem(
-                    f"{name} ({len(running)} proc)",
+                    f"{name} ({len(running)} running)",
                     (lambda p: lambda _i=None, _it=None: in_thread(on_stop, p))(by_name[name]),
                 )
                 for name, running in active.items()
@@ -132,7 +129,7 @@ def run_tray(
 
         items += [
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Settings…", lambda _i, _it: in_thread(open_settings)),
+            pystray.MenuItem("Manager…", lambda _i, _it: in_thread(open_settings)),
             pystray.MenuItem("Reload profiles", lambda _i, _it: rebuild(force=True)),
             pystray.MenuItem("Quit", lambda icon, _it: shutdown(icon)),
         ]
