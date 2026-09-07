@@ -1,10 +1,11 @@
-"""Data model behind the graphical configuration panel.
+"""Data model behind the manager window.
 
-Everything the panel needs to know that is *not* Tk lives here: which settings
-exist and how each one is edited, how a typed-in string becomes a stored value,
-and the read-only reports (paths, profiles, history) the panel renders.
+Everything the manager needs to know that is *not* Tk lives here: which pages
+it has, which settings exist and how each one is edited, how a typed-in string
+becomes a stored value, and the read-only reports (launch results, paths,
+profiles, history) it renders.
 
-Keeping it separate is what makes the panel testable — the whole model runs
+Keeping it separate is what makes the window testable — the whole model runs
 without a display, so the rules that decide whether `max_parallel: -1` is
 accepted are checked in CI rather than by clicking.
 """
