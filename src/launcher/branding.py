@@ -17,12 +17,16 @@ from __future__ import annotations
 
 import base64
 import struct
+import sys
 import zlib
 from functools import lru_cache
 from pathlib import Path
 
 APP_NAME = "Profile Auto Launcher"
 APP_ID = "profile-auto-launcher"
+# Windows keys a taskbar button to this, not to the window. Company.Product
+# is the shape the shell expects.
+TASKBAR_ID = "MuszKarol.ProfileAutoLauncher"
 
 # The product's own surface in miniature: the window ground, with the one
 # accent drawn on it. A white badge would vanish into a light taskbar.
@@ -169,8 +173,53 @@ def photo_image(size: int = 32, master=None):
     return tk.PhotoImage(master=master, data=base64.b64encode(png_bytes(size)))
 
 
+def claim_taskbar_identity() -> None:
+    """Tell Windows this process is its own application.
+
+    A process that never sets an AppUserModelID inherits the interpreter's,
+    so a pip-installed launcher shows up on the taskbar as pythonw. Called
+    once, before the first window is mapped; a no-op everywhere else.
+    """
+    if sys.platform != "win32" or getattr(claim_taskbar_identity, "done", False):
+        return
+    claim_taskbar_identity.done = True  # type: ignore[attr-defined]
+    try:
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(TASKBAR_ID)
+    except Exception:
+        pass
+
+
+def _windows_ico() -> str | None:
+    """The mark as a real `.ico` on disk, written on first use.
+
+    `iconphoto` reaches the title bar but not the taskbar button, which reads
+    an ICO; without one the button falls back to the interpreter's icon.
+    """
+    try:
+        from launcher.install import icon_path
+
+        path = icon_path()
+        if not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(ico_bytes())
+        return str(path)
+    except Exception:
+        return None
+
+
 def apply_window_icon(window) -> None:
     """Best-effort window/taskbar icon. Never raises: it is decoration."""
+    if sys.platform == "win32":
+        claim_taskbar_identity()
+        ico = _windows_ico()
+        if ico:
+            try:
+                window.iconbitmap(default=ico)
+                return
+            except Exception:
+                pass
     try:
         image = photo_image(64, master=window)
         window.iconphoto(False, image)
