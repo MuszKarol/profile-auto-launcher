@@ -8,74 +8,40 @@
 containers, the terminals. Pick *Dev*, *Work* or *Gaming*; `palaunch stop`
 closes it all again.
 
-Windows, Linux and macOS. Python 3.10+.
+Windows · Linux · macOS · Python 3.10+ · MIT
 
 </div>
-
-```
-┌──────────────────────────────────────────────────────────────────────────┐
-│  >_  Search profiles and apps                                            │
-│                                                                          │
-│  PROFILES                                                                │
-│ ▌   Dev           Spin up the full dev environment            4 steps    │
-│     Focus         Kill distractions, start the timer          2 steps    │
-│     Work          Mail, calendar, chat             default    2 steps    │
-│  APPLICATIONS                                                            │
-│     Firefox       Web browser                                  launch    │
-│  LAUNCHER                                                                │
-│     Settings      Open the manager                       open manager    │
-│                                                                          │
-│  ↑↓ move   ⏎ run   → preview   ^E edit   ^K stop   ^, manager   esc close│
-└──────────────────────────────────────────────────────────────────────────┘
-```
 
 ---
 
 ## Install
 
-**Windows** — download `palaunch-setup-<version>.exe` from the
-[latest release](https://github.com/MuszKarol/profile-auto-launcher/releases)
-and run it. It installs for your user only, so there is no administrator
-prompt, and it can start the launcher when you sign in.
+| You are on | Do this |
+|---|---|
+| **Windows** | Run `palaunch-setup-<version>.exe` from the [latest release](https://github.com/MuszKarol/profile-auto-launcher/releases). Per-user, no administrator prompt. |
+| **Anything else** | `pip install "profile-auto-launcher[full]"` then `palaunch install` |
+| **No Python at all** | Unpack the self-contained binary from a [release](https://github.com/MuszKarol/profile-auto-launcher/releases) and run `./palaunch install` |
 
-**Everything else** — install the package and run the setup window:
+`palaunch install` copies the sample profiles, writes the editor schema, adds a
+menu entry and registers the login item. Add `--cli` to skip the window,
+`--uninstall` to undo it. Your profiles are never touched either way.
 
-```bash
-pip install "profile-auto-launcher[full]"
-palaunch install
-```
-
-That window copies the sample profiles, writes the editor schema, adds a menu
-entry and registers the login item. `palaunch install --cli` does the same
-thing without a window, and `palaunch install --uninstall` undoes it — your
-profiles are never touched.
-
-Prefer no Python at all? Every [release](https://github.com/MuszKarol/profile-auto-launcher/releases)
-attaches a self-contained binary for Linux, Windows and both macOS
-architectures; run `./palaunch install` from the unpacked archive.
-
-> On Debian/Ubuntu the windows also need `sudo apt install python3-tk`.
-> Without it the command line still does everything.
+> Debian/Ubuntu need `sudo apt install python3-tk` for the windows. Without it
+> the command line still does everything.
 
 ---
 
 ## Quick start
 
-**1. Make a profile.** The wizard is the short way — it lists what you have
-installed and writes the YAML for you:
+### 1. Make a profile
 
 ```bash
-palaunch new "My Setup" --gui
+palaunch new "My Setup" --gui                 # wizard — lists what you have installed
+palaunch new "My Setup" --app code --url http://localhost:3000
+palaunch record "My Setup" --duration 120     # just work; it watches and writes the YAML
 ```
 
-The command line does it in one line, and so does a recording of you working:
-
-```bash
-palaunch new "My Setup" --app firefox --app code --url https://localhost:3000
-palaunch record "My Setup" --duration 120     # open your apps; it watches
-```
-
-A profile is a YAML file, so you can also just write one:
+Or write the file yourself:
 
 ```yaml
 name: Dev
@@ -110,24 +76,23 @@ teardown:                     # what `palaunch stop Dev` does
     run: ["docker", "compose", "down"]
 ```
 
-**2. Check it, then run it.**
+### 2. Check it, then run it
 
 ```bash
 palaunch run "My Setup" --dry-run    # describes every step, executes nothing
 palaunch run "My Setup"
-palaunch stop "My Setup"             # teardown + close what it opened
+palaunch stop "My Setup"             # teardown, then close what it opened
 ```
 
-**3. Make it resident.**
+### 3. Make it resident
 
 ```bash
 palaunch tray
 ```
 
-The tray icon lives in the system tray, menu bar or AppIndicator area. It
-listens for **`Alt+Space`** — which opens the launcher — runs any profile with
-its own `hotkey:`, and fires profiles that carry a schedule. Setup registers it
-to start at login for you.
+`Alt+Space` opens the launcher from anywhere. The tray also fires per-profile
+`hotkey:` bindings and scheduled profiles, and setup registers it to start at
+login.
 
 ---
 
@@ -135,29 +100,21 @@ to start at login for you.
 
 ### The launcher — `Alt+Space`, or `palaunch pick`
 
-Type to filter, `↑↓` to move, `→` to preview the steps, `Enter` to run — and
-watch each step report as it finishes.
-
-The whole interface is monochrome on purpose: one accent (white), no colour
-coding, no emoji, and outline icons only on the navigation and the tool
-headers. Hierarchy comes from weight and space, which is what keeps a window
-this dense readable.
-
-It searches **profiles and installed applications together**, so a context you
-have never bothered to write a profile for is still one keystroke away: type
-`firef`, press Enter, and only Firefox opens. Everything started that way is
-tracked, so `palaunch status` sees it and `palaunch stop "Quick launch"`
-closes it.
+- Type to filter, `↑↓` to move, `→` to preview the steps, `Enter` to run.
+- Searches **profiles and installed applications together**: type `firef`,
+  press Enter, and only Firefox opens — no profile needed.
+- Everything it starts is tracked, so `palaunch status` sees it and
+  `palaunch stop "Quick launch"` closes it.
+- Monochrome on purpose — one accent, no colour coding, no emoji. Hierarchy
+  comes from weight and space, which is what keeps a dense window readable.
 
 ### The manager — `palaunch settings`, `Ctrl+,`, or the tray
-
-Five pages, everything the CLI can do:
 
 | Page | What it does | CLI equivalent |
 |------|--------------|----------------|
 | Launch   | Run a profile, or one app by name; stop what is running | `run` / `app` / `stop` |
 | Profiles | Create, edit, record, validate, switch | `new` / `edit` / `record` |
-| Sync     | Git repo **and** rsync mirror of the profiles directory | `palaunch sync [--mirror]` |
+| Sync     | Git repo **and** rsync mirror of the profiles directory | `sync [--mirror]` |
 | Activity | Past runs, per-step timings and failure rates, the log | `history` / `logs` |
 | Settings | Every option, the credential store, the paths, setup | `config set` / `secret` / `where` |
 
@@ -165,23 +122,20 @@ Five pages, everything the CLI can do:
 
 ## How it works
 
-Profiles are YAML files in your config directory (`palaunch where` prints the
-exact path). Each is a list of **steps**, and the steps form a graph rather
-than a script: a step waits for the ones before it, consecutive
-`parallel: true` steps run together, and `depends_on:` wires an explicit edge.
-So a launch takes as long as its slowest branch, not the sum of its parts.
-
-There are 14 step types — launch an app, run a command or an inline script,
-open a URL, set environment variables, kill a process, wait, poll until a
-service is actually ready, mirror a directory with rsync, run another profile,
-notify, call an HTTP endpoint, run a plugin, or copy/link/write a file. Any
-step can be conditional (`when: {platform: linux, on_battery: false}`),
-optional, retried, or given a timeout. Values interpolate:
-`{{ vars.project }}`, `{{ env.HOME }}`, `{{ secret.api_token }}` from your OS
-credential store.
-
-Everything the launcher started is tracked, which is what makes `palaunch stop`
-and `palaunch switch Gaming` work.
+- **Profiles are YAML files** in your config directory — `palaunch where`
+  prints the exact path.
+- **Steps form a graph, not a script.** A step waits for the ones before it,
+  adjacent `parallel: true` steps run together, and `depends_on:` wires an
+  explicit edge. A launch takes as long as its slowest branch, not the sum of
+  its parts.
+- **14 step types:** `app`, `command`, `script`, `url`, `env`, `kill`, `wait`,
+  `wait_for`, `rsync`, `profile`, `notify`, `http`, `plugin`, `file`.
+- **Any step can be** conditional (`when: {platform: linux, on_battery: false}`),
+  optional, retried, or given a timeout.
+- **Values interpolate:** `{{ vars.project }}`, `{{ env.HOME }}` and
+  `{{ secret.api_token }}` from your OS credential store.
+- **Everything started is tracked** — which is what makes `palaunch stop` and
+  `palaunch switch Gaming` work.
 
 ### Commands worth knowing
 
@@ -203,9 +157,8 @@ palaunch where               # every path and hotkey the launcher uses
 
 ## Documentation
 
-- **[docs/REFERENCE.md](docs/REFERENCE.md)** — architecture, the execution
-  model, every step type, condition, placeholder and setting, and the full
-  command list.
+- **[docs/REFERENCE.md](docs/REFERENCE.md)** — architecture, execution model,
+  every step type, condition, placeholder and setting, and the full command list.
 - **[RELEASING.md](RELEASING.md)** — how a version is cut.
 - **[CHANGELOG.md](CHANGELOG.md)** — what changed.
 
@@ -218,8 +171,8 @@ ruff check src tests && ruff format --check src tests
 python -m launcher.branding assets     # regenerate the icon files
 ```
 
-Set `PAL_INCLUDE_CWD=1` to also pick up `./profiles/` from the repository.
-It is opt-in on purpose: running `palaunch` in an unfamiliar directory that
+Set `PAL_INCLUDE_CWD=1` to also pick up `./profiles/` from the repository. It
+is opt-in on purpose: running `palaunch` in an unfamiliar directory that
 happens to contain `profiles/*.yaml` would otherwise execute whatever those
 files declare.
 
