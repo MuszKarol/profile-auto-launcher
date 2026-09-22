@@ -92,6 +92,18 @@ def split_hint(label: str) -> tuple[str, str]:
     return label, ""
 
 
+def pretty_keys(combo: str) -> str:
+    """'<ctrl>+<alt>+d' → 'Ctrl+Alt+D': a hotkey the way a keyboard labels it."""
+    names = {"cmd": "Cmd", "ctrl": "Ctrl", "alt": "Alt", "shift": "Shift", "super": "Super"}
+    keys = []
+    for part in combo.split("+"):
+        key = part.strip().strip("<>")
+        if not key:
+            continue
+        keys.append(names.get(key.lower(), key.upper() if len(key) == 1 else key.capitalize()))
+    return "+".join(keys)
+
+
 def _descendants(widget: tk.Misc) -> Iterable[tk.Misc]:
     yield widget
     for child in widget.winfo_children():
@@ -253,6 +265,33 @@ class Kit:
         )
         widget.pack(fill="x", pady=(self.m.gap_lg, self.m.gap_sm))
         return widget
+
+    def search_field(self, parent: tk.Misc, placeholder: str = "", width: int = 40) -> tk.Entry:
+        """A field with a magnifier inside it. Returns the entry; its outline
+        frame — the thing to pack — is `entry.field`."""
+        pal = self.pal
+        field = tk.Frame(
+            parent,
+            bg=pal.field_bg,
+            highlightthickness=1,
+            highlightbackground=pal.field_border,
+            cursor="xterm",
+        )
+        glass = icons.draw(field, "search", 14, pal.faint, pal.field_bg)
+        glass.pack(side="left", padx=(FIELD_INSET + 4, 0))
+        entry = self.entry(field, "", width=width, mono=False, placeholder=placeholder)
+        entry.configure(highlightthickness=0)
+        entry.pack(side="left", fill="x", expand=True)
+
+        def ring(colour: str) -> None:
+            field.configure(highlightbackground=colour)
+
+        entry.bind("<FocusIn>", lambda _e: ring(pal.muted), add="+")
+        entry.bind("<FocusOut>", lambda _e: ring(pal.field_border), add="+")
+        glass.bind("<Button-1>", lambda _e: entry.focus_set())
+        field.bind("<Button-1>", lambda _e: entry.focus_set())
+        entry.field = field  # type: ignore[attr-defined]
+        return entry
 
     def keycap(self, parent: tk.Misc, text: str, bg: str | None = None) -> tk.Frame:
         """A key name in a hairline box — how shortcuts are shown."""
@@ -593,9 +632,17 @@ class Kit:
                 edge = pal.accent_hover if state["hover"] else pal.accent
                 box.create_rectangle(1, 1, size - 2, size - 2, fill=edge, outline=edge)
                 box.create_line(
-                    4, 8.5, 7, 11.5, 12, 5,
-                    fill=pal.on_accent, width=2, capstyle="round", joinstyle="round",
-                )  # fmt: skip
+                    4,
+                    8.5,
+                    7,
+                    11.5,
+                    12,
+                    5,
+                    fill=pal.on_accent,
+                    width=2,
+                    capstyle="round",
+                    joinstyle="round",
+                )
             else:
                 edge = (
                     pal.muted
