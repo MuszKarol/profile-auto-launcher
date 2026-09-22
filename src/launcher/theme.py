@@ -42,6 +42,7 @@ class Palette:
     accent_hover: str
     on_accent: str  # text drawn on top of `accent`
     border: str
+    border_strong: str  # a hovered or focused control's outline
     ok: str
     err: str
     warn: str
@@ -64,13 +65,14 @@ DARK = Palette(
     accent_hover="#e4e4e7",
     on_accent="#000000",
     border="#27272a",
+    border_strong="#3f3f46",
     # No semantic hues: a failure is the brightest thing on screen, ordinary
     # success is body text, and anything skipped fades into the secondary tone.
     ok="#f4f4f5",
     err="#ffffff",
     warn="#a1a1aa",
     field_bg="#1c1c1e",
-    field_border="#27272a",
+    field_border="#2e2e32",
     shadow="#000000",
 )
 
@@ -88,6 +90,7 @@ LIGHT = Palette(
     accent_hover="#27272a",
     on_accent="#ffffff",
     border="#e4e4e7",
+    border_strong="#a1a1aa",
     ok="#09090b",
     err="#000000",
     warn="#52525b",
@@ -110,6 +113,7 @@ class Metrics:
     row_pad_x: int = 14
     row_pad_y: int = 10
     radius: int = 10  # only reachable where Tk draws its own shapes (canvas)
+    control_pad_y: int = 6  # inner vertical padding shared by buttons, fields and menus
 
 
 METRICS = Metrics()
