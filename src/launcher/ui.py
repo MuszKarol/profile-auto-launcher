@@ -810,20 +810,6 @@ class Kit:
         return edge
 
     # ── read-only surfaces ───────────────────────────────────────────────
-    def listbox(self, parent: tk.Misc, height: int = 12) -> tk.Listbox:
-        return tk.Listbox(
-            parent,
-            bg=self.pal.panel,
-            fg=self.pal.fg,
-            selectbackground=self.pal.panel_selected,
-            selectforeground=self.pal.fg,
-            relief="flat",
-            font=self.fm(SIZE_SMALL),
-            highlightthickness=0,
-            activestyle="none",
-            height=height,
-        )
-
     def textbox(self, parent: tk.Misc, height: int = 12) -> tk.Text:
         """A read-only, monospaced output area."""
         return tk.Text(
