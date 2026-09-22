@@ -8,6 +8,21 @@ All notable changes to this project are recorded here. The format follows
 
 ### Changed
 
+- **Every control is drawn in the palette.** Checkboxes, drop-downs and
+  scrollbars no longer fall back to Tk's native widgets, which on Linux drew
+  bevelled boxes and arrowed slabs. Buttons, fields and menus share one
+  height, brighten their outline on hover, and buttons fire on release.
+- **Lists are rows, not padded monospace text.** Profiles, launch results,
+  editor steps and secrets show a bold name, a quieter description, outlined
+  tags (`default`, a hotkey as `Ctrl+Alt+D`) and a count, with keyboard
+  navigation and an ellipsis instead of a clipped last letter.
+- **The manager breathes.** Page actions sit in the header, Sync shows its two
+  methods side by side, Settings puts each option's help under its name, and
+  the output pane opens by itself when there is something to read.
+- **The launcher shows progress.** A run shows a bar and "4 of 12", each step
+  is marked done, skipped or failed with an icon, and the shortcut hints are
+  keycaps.
+
 - **The interface is monochrome.** Deep black ground (`#09090b`), cards a step
   above it, white as the only accent — primary buttons are solid white with
   black text — and two text tones over it. There are no semantic colours left,
@@ -15,8 +30,9 @@ All notable changes to this project are recorded here. The format follows
   text on screen, ordinary success is body text, and anything skipped or
   inactive drops to grey. The light palette is the same system inverted.
 - **Icons only where they mean something.** `launcher.icons` draws a small
-  outline set on a 24-unit grid — one per navigation entry, repeated on that
-  tool's header, and nothing else. Rows, buttons and fields carry text alone.
+  outline set on a 24-unit grid — one per navigation entry, and one on the
+  buttons whose verb has a familiar shape (run, add, remove, move, open a
+  folder). Page headers carry none, since the navigation already shows it.
   They are strokes on a canvas rather than an icon font, so they take the
   palette's colour and look the same on Windows, macOS and Linux.
 - **No emoji, anywhere.** The wizard's presets, the sample profiles, the
