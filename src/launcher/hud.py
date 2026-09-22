@@ -37,9 +37,9 @@ MAX_APP_RESULTS = 6
 # Measured row geometry, used to size the window to its content. Tk packs
 # children past the edge of a frame rather than scrolling them, so the window
 # has to be told how tall its list actually is.
-ROW_HEIGHT = 61
-GROUP_HEIGHT = 25
-CHROME_HEIGHT = 148
+ROW_HEIGHT = 59
+GROUP_HEIGHT = 28
+CHROME_HEIGHT = 137
 
 
 @dataclass
@@ -132,6 +132,10 @@ class _Hud:
         self.failed_count = 0
         self.running = False
         self.preview_open = False
+        self.waiting: tk.Label | None = None
+        self.done_count = 0
+        self.total_steps = 0
+        self.finished = False
         state = load_state()
         self.last_profile: str | None = state.get("last_profile")
         self.run_counts: dict[str, int] = state.get("run_counts", {})
@@ -256,13 +260,21 @@ class _Hud:
             self.body, bg=pal.panel, padx=theme.METRICS.gap, pady=theme.METRICS.gap
         )
 
-        self.footer = kit.label(
-            self.outer,
-            "↑↓ move     ⏎ run     → preview     ^E edit     ^K stop     ^, manager     esc close",
-            fg=pal.faint,
-            size=SIZE_TINY,
+        self.footer = kit.frame(self.outer)
+        self.footer.pack(fill="x", pady=(theme.METRICS.gap, 0))
+        self._hints(
+            self.footer,
+            (
+                ("↑↓", "move"),
+                ("⏎", "run"),
+                ("→", "preview"),
+                ("Ctrl E", "edit"),
+                ("Ctrl K", "stop"),
+                ("Ctrl ,", "manager"),
+                ("Esc", "close"),
+            ),
         )
-        self.footer.pack(anchor="w", pady=(theme.METRICS.gap, 0))
+        self.footer_note = kit.label(self.footer, "", fg=pal.err, size=SIZE_TINY, anchor="w")
 
         self.query.trace_add("write", lambda *_: self._redraw())
         for sequence, handler in (
@@ -280,6 +292,15 @@ class _Hud:
         self.root.bind("<Tab>", lambda _e: self._set_preview(not self.preview_open))
         self.root.bind("<FocusOut>", self._maybe_close_on_blur)
         self._redraw()
+
+    def _hints(self, parent: tk.Frame, pairs: tuple[tuple[str, str], ...]) -> None:
+        """Keyboard hints: each key in a keycap, what it does beside it."""
+        kit = self.kit
+        for position, (key, action) in enumerate(pairs):
+            kit.keycap(parent, key).pack(
+                side="left", padx=(0 if position == 0 else theme.METRICS.gap, 4)
+            )
+            kit.label(parent, action, fg=self.pal.faint, size=SIZE_TINY).pack(side="left")
 
     def _maybe_close_on_blur(self, _event: tk.Event) -> None:
         # close when the whole app loses focus (Spotlight-like behaviour),
@@ -312,17 +333,18 @@ class _Hud:
             if profile.name in self.active:
                 badge = ("running", self.pal.fg)
             elif profile.name == self.last_profile:
-                badge = ("recent", self.pal.muted)
+                badge = ("last run", self.pal.muted)
             elif profile.default:
-                badge = ("default", self.pal.faint)
+                badge = ("default", self.pal.muted)
             else:
                 badge = None
+            steps = len(profile.steps)
             rows.append(
                 Row(
                     kind="profile",
                     name=profile.name,
                     description=profile.description,
-                    tail=f"{len(profile.steps)} steps",
+                    tail=f"{steps} step" if steps == 1 else f"{steps} steps",
                     payload=profile,
                     badge=badge,
                 )
@@ -348,8 +370,9 @@ class _Hud:
                 kind="app",
                 name=app.name,
                 description=apps.describe(app),
-                tail="launch",
+                tail="",
                 payload=app,
+                badge=("app", self.pal.muted),
             )
             for app in found
             if app.name.lower() not in taken
@@ -412,11 +435,12 @@ class _Hud:
             if len(kinds) > 1 and row.kind != previous_kind:
                 header = self.kit.label(
                     self.list_frame,
-                    {"profile": "profiles", "app": "applications", "action": "launcher"}[row.kind],
+                    {"profile": "PROFILES", "app": "APPLICATIONS", "action": "LAUNCHER"}[row.kind],
                     fg=self.pal.faint,
                     size=SIZE_TINY,
                     bold=True,
                     anchor="w",
+                    padx=theme.METRICS.gap + 5,
                 )
                 header.pack(fill="x", pady=(theme.METRICS.gap_sm, 2))
                 self.rows.append(header)
@@ -427,61 +451,72 @@ class _Hud:
 
     def _make_row(self, position: int, entry: Row) -> tk.Frame:
         pal, kit = self.pal, self.kit
+        ground = pal.bg
         row = tk.Frame(
-            self.list_frame, bg=pal.panel, padx=theme.METRICS.gap, pady=theme.METRICS.gap_sm
+            self.list_frame, bg=ground, padx=theme.METRICS.gap, pady=theme.METRICS.gap_sm
         )
-        row.pack(fill="x", pady=2)
+        row.pack(fill="x", pady=1)
 
-        bar = tk.Frame(row, bg=pal.panel, width=3)
-        bar.pack(side="left", fill="y", padx=(0, theme.METRICS.gap_sm))
+        bar = tk.Frame(row, bg=ground, width=2)
+        bar.pack(side="left", fill="y", padx=(0, theme.METRICS.gap))
         row.accent_bar = bar  # type: ignore[attr-defined]
-
-        text = tk.Frame(row, bg=pal.panel)
-        text.pack(side="left", fill="x", expand=True)
-        kit.label(text, entry.name, bg=pal.panel, size=SIZE_BODY, bold=True, anchor="w").pack(
-            fill="x"
-        )
-        if entry.description:
-            kit.label(
-                text,
-                entry.description[:70],
-                bg=pal.panel,
-                fg=pal.muted,
-                size=SIZE_TINY,
-                anchor="w",
-            ).pack(fill="x")
+        edges: list[tk.Frame] = []
 
         if entry.tail:
-            kit.label(row, entry.tail, bg=pal.panel, fg=pal.faint, size=SIZE_TINY).pack(
-                side="right"
+            kit.label(row, entry.tail, bg=ground, fg=pal.faint, size=SIZE_TINY).pack(
+                side="right", padx=(theme.METRICS.gap_sm, 0)
             )
         if entry.badge is not None:
-            kit.label(row, entry.badge[0], bg=pal.panel, fg=entry.badge[1], size=SIZE_TINY).pack(
-                side="right", padx=(0, theme.METRICS.gap_sm)
-            )
+            edge = tk.Frame(row, bg=pal.border_strong)
+            edge.pack(side="right")
+            tk.Label(
+                edge,
+                text=entry.badge[0],
+                bg=ground,
+                fg=entry.badge[1],
+                font=kit.f(SIZE_TINY),
+                padx=5,
+                pady=0,
+            ).pack(padx=1, pady=1)
+            edges.append(edge)
+
+        text = tk.Frame(row, bg=ground)
+        text.pack(side="left", fill="x", expand=True)
+        title = kit.label(text, "", bg=ground, size=SIZE_BODY, bold=True, anchor="w")
+        title.pack(fill="x")
+        kit.elide(title, entry.name)
+        if entry.description:
+            detail = kit.label(text, "", bg=ground, fg=pal.muted, size=SIZE_TINY, anchor="w")
+            detail.pack(fill="x")
+            kit.elide(detail, entry.description)
+
+        parts = [row, text, *row.winfo_children(), *text.winfo_children()]
+        parts += [child for edge in edges for child in edge.winfo_children()]
 
         def set_bg(colour: str) -> None:
-            for widget in (row, text, *row.winfo_children(), *text.winfo_children()):
-                if widget is not bar:
+            for widget in parts:
+                if widget is not bar and widget not in edges:
                     widget.configure(bg=colour)
 
         row.set_bg = set_bg  # type: ignore[attr-defined]
 
         def on_enter(_event: tk.Event, index: int = position) -> None:
-            self.index = index
-            self._highlight()
+            if self.index != index:
+                self.index = index
+                self._highlight()
 
-        for widget in (row, text, *row.winfo_children(), *text.winfo_children()):
+        for widget in parts:
             widget.bind("<Motion>", on_enter)
             widget.bind("<Button-1>", self._commit)
+            widget.configure(cursor="hand2")
         return row
 
     def _highlight(self) -> None:
         selectable = [widget for widget in self.rows if hasattr(widget, "set_bg")]
         for position, widget in enumerate(selectable):
             selected = position == self.index
-            widget.set_bg(self.pal.panel_selected if selected else self.pal.panel)
-            widget.accent_bar.configure(bg=self.pal.accent if selected else self.pal.panel)
+            widget.set_bg(self.pal.panel_selected if selected else self.pal.bg)
+            widget.accent_bar.configure(bg=self.pal.accent if selected else self.pal.bg)
         if self.preview_open:
             self._render_preview()
 
@@ -504,7 +539,11 @@ class _Hud:
         self.preview_open = visible
         if visible:
             self._resize(int(self.base_width * 1.55), self.max_height)
-            self.preview_frame.pack(side="right", fill="both", padx=(theme.METRICS.gap, 0))
+            # A fixed width: the step lines are cut to fit it, rather than the
+            # longest one deciding how wide the panel — and the window — gets.
+            self.preview_frame.configure(width=int(self.base_width * 0.55) - theme.METRICS.gap)
+            self.preview_frame.pack_propagate(False)
+            self.preview_frame.pack(side="right", fill="y", padx=(theme.METRICS.gap, 0))
             self._render_preview()
         else:
             self.preview_frame.pack_forget()
@@ -553,20 +592,21 @@ class _Hud:
             note = "" if step.enabled else "  (off)"
             if step.enabled and step.parallel:
                 note = "  (parallel)"
-            kit.label(
+            text = kit.label(
                 line,
-                describe_step(step)[:60] + note,
+                "",
                 bg=pal.panel,
                 fg=pal.faint if not step.enabled else pal.fg,
                 size=SIZE_TINY,
                 mono=True,
                 anchor="w",
-                justify="left",
-            ).pack(side="left", fill="x", expand=True)
+            )
+            text.pack(side="left", fill="x", expand=True)
+            kit.elide(text, describe_step(step) + note)
         if len(profile.steps) > len(shown):
             kit.label(
                 self.preview_frame,
-                f"… +{len(profile.steps) - len(shown)} more",
+                f"and {len(profile.steps) - len(shown)} more",
                 bg=pal.panel,
                 fg=pal.faint,
                 size=SIZE_TINY,
@@ -669,13 +709,16 @@ class _Hud:
             detail = apps.launch(app)
             print(detail)
         except (LookupError, OSError) as exc:
-            self.footer.configure(text=f"could not launch {app.name}: {exc}", fg=self.pal.err)
+            for child in self.footer.winfo_children():
+                child.pack_forget()
+            self.footer_note.configure(text=f"Could not launch {app.name}: {exc}")
+            self.footer_note.pack(side="left")
             self.exit_code = 1
             return
         self.root.destroy()
 
     def _build_progress(self, profile: Profile, verb: str = "Running") -> None:
-        pal, kit = self.pal, self.kit
+        pal, kit, m = self.pal, self.kit, theme.METRICS
         if self.preview_open:
             self.preview_frame.pack_forget()
             self.preview_open = False
@@ -683,26 +726,51 @@ class _Hud:
         for child in self.outer.winfo_children():
             child.destroy()
         self.rows.clear()
+        self.done_count = 0
+        # A stop reports one line per process, not per step, so only a run
+        # has a known total to measure progress against.
+        self.total_steps = len(profile.steps) if verb == "Running" else 0
 
         header = kit.frame(self.outer)
-        header.pack(fill="x")
-        kit.brand(header, 20).pack(side="left", padx=(0, theme.METRICS.gap_sm))
+        header.pack(fill="x", pady=(m.gap_xs, 0))
+        kit.brand(header, 22).pack(side="left", padx=(0, m.gap))
         kit.label(header, f"{verb} {profile.name}", size=SIZE_DISPLAY, bold=True).pack(side="left")
+        self.counter = kit.label(header, "", fg=pal.faint, size=SIZE_SMALL)
+        self.counter.pack(side="right")
 
-        kit.divider(self.outer, pady=(theme.METRICS.gap, theme.METRICS.gap))
+        self.track = tk.Canvas(self.outer, height=2, bg=pal.border, highlightthickness=0)
+        self.track.pack(fill="x", pady=(m.gap, m.gap))
+        self.fill_bar = self.track.create_rectangle(0, 0, 0, 2, fill=pal.accent, outline="")
+        self.track.bind("<Configure>", lambda _e: self._draw_progress())
+        self._draw_progress()
 
         self.progress_frame = kit.frame(self.outer)
         self.progress_frame.pack(fill="both", expand=True)
-
-        self.status = kit.label(
-            self.outer,
-            "esc hides the window — the steps keep running",
-            fg=pal.faint,
-            size=SIZE_TINY,
+        self.waiting = kit.label(
+            self.progress_frame, "Starting…", fg=pal.faint, size=SIZE_SMALL, anchor="w"
         )
-        self.status.pack(anchor="w", pady=(theme.METRICS.gap, 0))
+        self.waiting.pack(fill="x", pady=(m.gap_xs, 0))
+
+        footer = kit.frame(self.outer)
+        footer.pack(fill="x", pady=(m.gap, 0))
+        kit.keycap(footer, "Esc").pack(side="left", padx=(0, 6))
+        self.status = kit.label(
+            footer, "hides the window; the steps keep running", fg=pal.faint, size=SIZE_TINY
+        )
+        self.status.pack(side="left")
         self.root.bind("<Escape>", lambda _e: self.root.destroy())
         self.root.bind("<Return>", lambda _e: None)
+
+    def _draw_progress(self) -> None:
+        width = self.track.winfo_width()
+        if self.total_steps:
+            share = min(1.0, self.done_count / self.total_steps)
+            self.counter.configure(text=f"{self.done_count} of {self.total_steps}")
+        else:
+            share = 0.0
+        if self.finished:
+            share = 1.0
+        self.track.coords(self.fill_bar, 0, 0, int(width * share), 2)
 
     def _worker(self, profile: Profile) -> None:
         try:
@@ -730,40 +798,58 @@ class _Hud:
             self.root.after(60, self._poll_results)
 
     def _add_result_row(self, result: StepResult) -> None:
-        pal, kit = self.pal, self.kit
+        pal, kit, m = self.pal, self.kit, theme.METRICS
+        if self.waiting is not None:
+            self.waiting.destroy()
+            self.waiting = None
         if result.counts_as_failure:
             self.failed_count += 1
+        self.done_count += 1
+        self._draw_progress()
+
         row = kit.frame(self.progress_frame)
-        row.pack(fill="x", pady=2)
+        row.pack(fill="x", pady=3)
         if result.skipped:
-            status, tone, weight = "skipped", pal.faint, False
+            glyph, tone = "minus", pal.faint
         elif result.ok:
-            status, tone, weight = "done", pal.muted, False
+            glyph, tone = "check", pal.muted
         else:
-            status, tone, weight = "failed", pal.err, True
-        kit.label(row, status, fg=tone, size=SIZE_TINY, bold=weight, width=8, anchor="w").pack(
-            side="left"
+            glyph, tone = "close", pal.err
+        kit.icon(row, glyph, 14, tone).pack(side="left", padx=(0, m.gap))
+        failed = not result.ok and not result.skipped
+        detail = kit.label(
+            row,
+            "",
+            fg=pal.err if failed and not result.step.optional else pal.faint,
+            size=SIZE_TINY,
+            anchor="e",
         )
+        detail.pack(side="right", padx=(m.gap, 0))
+        kit.elide(detail, result.detail[:90])
         kit.label(
             row,
             result.step.label,
             fg=pal.faint if result.skipped else pal.fg,
             size=SIZE_SMALL,
+            bold=failed,
             anchor="w",
         ).pack(side="left")
-        detail_fg = pal.err if (not result.ok and not result.step.optional) else pal.faint
-        kit.label(row, result.detail[:90], fg=detail_fg, size=SIZE_TINY, anchor="e").pack(
-            side="right"
-        )
 
     def _finish(self) -> None:
+        self.finished = True
+        self._draw_progress()
+        for child in self.status.master.winfo_children():
+            if child is not self.status:
+                child.destroy()
         if self.failed_count == 0:
-            self.status.configure(text="All steps finished — closing", fg=self.pal.fg)
+            self.status.configure(text="All steps finished. Closing…", fg=self.pal.fg)
             self.exit_code = 0
             self.root.after(1400, self.root.destroy)
         else:
+            failed = self.failed_count
             self.status.configure(
-                text=f"{self.failed_count} step(s) failed — esc to close", fg=self.pal.err
+                text=f"{failed} step{'s' if failed != 1 else ''} failed. Press Esc to close.",
+                fg=self.pal.err,
             )
             self.exit_code = 1
 
