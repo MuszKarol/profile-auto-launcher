@@ -31,34 +31,34 @@ from launcher.config import (
     profiles_dir,
 )
 from launcher.executor import describe_step
-from launcher.theme import SIZE_BODY, SIZE_SMALL, SIZE_TINY, SIZE_TITLE
+from launcher.theme import SIZE_SMALL, SIZE_TINY, SIZE_TITLE
 from launcher.ui import Kit
 
 # Per-type form layout: (yaml key, label, kind).
 # kind: str | text | bool | number | list | dict | choice:<options>
 _COMMON_TAIL = [
     ("enabled", "Enabled", "bool"),
-    ("optional", "Optional (failure ignored)", "bool"),
-    ("parallel", "Run in parallel with neighbours", "bool"),
+    ("optional", "Optional (a failure does not fail the run)", "bool"),
+    ("parallel", "Parallel (runs alongside its neighbours)", "bool"),
     ("timeout", "Timeout (s)", "number"),
     ("retries", "Retries", "number"),
     ("retry_delay", "Retry delay (s)", "number"),
-    ("depends_on", "Depends on (step ids)", "list"),
+    ("depends_on", "Depends on (step ids, comma separated)", "list"),
 ]
 
 FIELDS: dict[str, list[tuple[str, str, str]]] = {
     "app": [
         ("path", "Executable path", "str"),
-        ("args", "Arguments (comma sep.)", "list"),
+        ("args", "Arguments (comma separated)", "list"),
         ("cwd", "Working directory", "str"),
         ("detach", "Detach (launch and forget)", "bool"),
-        ("track", "Track pid for `palaunch stop`", "bool"),
+        ("track", "Track (so `palaunch stop` can close it)", "bool"),
     ],
     "command": [
-        ("run", "Command (comma sep. argv)", "list"),
+        ("run", "Command (argv, comma separated)", "list"),
         ("cwd", "Working directory", "str"),
         ("detach", "Detach (don't wait)", "bool"),
-        ("track", "Track pid for `palaunch stop`", "bool"),
+        ("track", "Track (so `palaunch stop` can close it)", "bool"),
     ],
     "script": [
         ("script", "Script body", "text"),
@@ -73,8 +73,8 @@ FIELDS: dict[str, list[tuple[str, str, str]]] = {
     "kill": [("process", "Process name", "str")],
     "wait": [("seconds", "Seconds", "number")],
     "wait_for": [
-        ("url", "URL (tcp:// or http://)", "str"),
-        ("run", "…or command (argv)", "list"),
+        ("url", "URL (tcp://host:port or http://…)", "str"),
+        ("run", "Or a command (argv, comma separated)", "list"),
         ("interval", "Poll interval (s)", "number"),
     ],
     "profile": [("profile", "Profile name", "str")],
@@ -84,24 +84,24 @@ FIELDS: dict[str, list[tuple[str, str, str]]] = {
         ("method", "Method", "choice:GET,POST,PUT,PATCH,DELETE,HEAD"),
         ("headers", "Headers (KEY=VALUE per line)", "dict"),
         ("body", "Body", "text"),
-        ("expect_status", "Expected status codes", "list"),
+        ("expect_status", "Expected status (e.g. 200, 204)", "list"),
     ],
     "plugin": [
         ("plugin", "Executable", "str"),
-        ("args", "Arguments (comma sep.)", "list"),
+        ("args", "Arguments (comma separated)", "list"),
         ("config", "Config (KEY=VALUE per line)", "dict"),
     ],
     "file": [
         ("action", "Action", "choice:" + ",".join(sorted(KNOWN_FILE_ACTIONS))),
         ("src", "Source", "str"),
         ("dest", "Destination", "str"),
-        ("content", "Content (write/append)", "text"),
+        ("content", "Content", "text"),
     ],
     "rsync": [
         ("src", "Source directory", "str"),
         ("dest", "Destination (path or user@host:/path)", "str"),
         ("delete", "Delete files the source no longer has", "bool"),
-        ("exclude", "Exclude (globs)", "list"),
+        ("exclude", "Exclude (globs, comma separated)", "list"),
         ("backend", "Backend", "choice:auto,rsync,builtin"),
     ],
 }
@@ -115,7 +115,7 @@ PROFILE_FIELDS = [
     ("tags", "Tags (comma separated)", "list"),
     ("hotkey", "Hotkey (e.g. <ctrl>+<alt>+d)", "str"),
     ("default", "Default profile", "bool"),
-    ("autostart", "Run at login (tray)", "bool"),
+    ("autostart", "Run at login (while the tray is running)", "bool"),
 ]
 
 
@@ -151,6 +151,11 @@ def _format_list(value: Any) -> str:
     return "" if value is None else str(value)
 
 
+# Width of the wizard's label column, shared by its two form grids so their
+# fields line up.
+LABEL_COLUMN = 104
+
+
 class _Base:
     """Shared plumbing: the kit, the window, and modal bookkeeping."""
 
@@ -174,149 +179,199 @@ class _Wizard(_Base):
     """Name it, pick what it opens, get a profile that already works."""
 
     def __init__(self, parent: tk.Misc | None = None) -> None:
-        super().__init__(parent, "New profile", "780x740")
+        super().__init__(parent, "New profile", "760x800")
+        self.root.minsize(640, 640)
         self.result: Path | None = None
         self.chosen_apps: list[str] = []
         self.matches: list[str] = []
+        self._auto_name = ""
         self._build()
 
     def _build(self) -> None:
-        kit, pal = self.kit, self.pal
+        kit, pal, m = self.kit, self.pal, self.m
         # Buttons are packed before the body so a tall form never pushes them
         # off the bottom of the window.
-        buttons = kit.frame(self.root, padx=self.m.gap_xl, pady=self.m.gap)
+        buttons = kit.frame(self.root, padx=m.gap_xl, pady=m.gap)
         buttons.pack(fill="x", side="bottom")
-        kit.button(buttons, "Create", lambda: self._create(edit=False), kind="primary")
-        kit.button(buttons, "Create and edit steps", lambda: self._create(edit=True))
-        kit.button(buttons, "Cancel", self.root.destroy, kind="quiet")
-
-        self.error = kit.label(
-            self.root, "", fg=self.pal.err, size=SIZE_SMALL, anchor="w", padx=self.m.gap_xl
+        kit.button(
+            buttons,
+            "Create",
+            lambda: self._create(edit=False),
+            kind="primary",
+            side="right",
+            padx=0,
         )
-        self.error.pack(fill="x", side="bottom")
+        kit.button(
+            buttons,
+            "Create and edit steps",
+            lambda: self._create(edit=True),
+            side="right",
+            padx=(0, m.gap_sm),
+        )
+        kit.button(
+            buttons, "Cancel", self.root.destroy, kind="quiet", side="right", padx=(0, m.gap_sm)
+        )
+        self.error = kit.label(buttons, "", fg=pal.err, size=SIZE_SMALL, bold=True, anchor="w")
+        self.error.pack(side="left", fill="x", expand=True)
+        tk.Frame(self.root, bg=pal.border, height=1).pack(fill="x", side="bottom")
 
-        outer = kit.frame(self.root, padx=self.m.gap_xl, pady=self.m.gap_lg)
+        outer = kit.frame(self.root, padx=m.gap_xl, pady=m.gap_lg)
         outer.pack(fill="both", expand=True)
 
-        kit.label(outer, "New profile", size=SIZE_TITLE, bold=True).pack(anchor="w")
+        kit.label(outer, "New profile", size=SIZE_TITLE, bold=True, anchor="w").pack(fill="x")
         kit.label(
             outer,
-            "A profile opens a whole context at once. Start from a preset, then say what it opens.",
+            "A profile opens a whole working context at once. "
+            "Start from a preset, then say what it opens.",
             fg=pal.muted,
             size=SIZE_SMALL,
-        ).pack(anchor="w", pady=(2, self.m.gap))
+            anchor="w",
+        ).pack(fill="x", pady=(2, m.gap_lg))
 
-        presets = kit.frame(outer)
-        presets.pack(fill="x", pady=(0, self.m.gap))
-        for item in scaffold.PRESETS:
-            kit.button(presets, item.title, lambda p=item: self._apply_preset(p), kind="quiet")
+        self.preset_var = tk.StringVar(value=scaffold.PRESETS[0].key)
+        kit.segmented(
+            outer,
+            [(item.title, item.key) for item in scaffold.PRESETS],
+            self.preset_var,
+            lambda: self._apply_preset(scaffold.preset(self.preset_var.get())),
+        ).pack(anchor="w", pady=(0, m.gap_lg))
 
         form = kit.frame(outer)
         form.pack(fill="x")
+        form.columnconfigure(0, minsize=LABEL_COLUMN)
         form.columnconfigure(1, weight=1)
         self.fields: dict[str, tk.Entry] = {}
-        for row, (key, label) in enumerate(
+        for row, (key, label, example) in enumerate(
             (
-                ("name", "Name"),
-                ("description", "Description"),
-                ("tags", "Tags (comma separated)"),
-                ("hotkey", "Hotkey (optional)"),
+                ("name", "Name", "Deep work"),
+                ("description", "Description", "What this context is for"),
+                ("tags", "Tags", "comma separated, e.g. code, focus"),
+                ("hotkey", "Hotkey", "optional, e.g. <ctrl>+<alt>+d"),
             )
         ):
-            kit.label(form, label, size=SIZE_SMALL, width=22, anchor="w").grid(
-                row=row, column=0, sticky="w", pady=3
+            kit.label(form, label, size=SIZE_SMALL, fg=pal.muted, anchor="w").grid(
+                row=row, column=0, sticky="w", pady=m.gap_xs, padx=(0, m.gap_lg)
             )
-            entry = kit.entry(form, "", width=46, mono=False)
-            entry.grid(row=row, column=1, sticky="ew", pady=3)
+            entry = kit.entry(form, "", width=40, mono=key == "hotkey", placeholder=example)
+            entry.grid(row=row, column=1, sticky="ew", pady=m.gap_xs)
             self.fields[key] = entry
         self.fields["name"].focus_set()
 
-        apps_card = kit.card(outer)
-        apps_card.pack(fill="both", expand=True, pady=(self.m.gap, 0))
-        apps_box = apps_card.inner
-        kit.label(apps_box, "Applications to open", bg=pal.panel, size=SIZE_BODY, bold=True).pack(
-            anchor="w"
-        )
-        search = tk.Frame(apps_box, bg=pal.panel)
-        search.pack(fill="x", pady=(self.m.gap_sm, 0))
-        self.app_query = kit.entry(search, "", width=32, mono=False)
-        self.app_query.pack(side="left", ipady=3)
-        self.app_query.bind("<KeyRelease>", lambda _e: self._search_apps())
-        self.app_query.bind("<Return>", lambda _e: self._add_app())
-        kit.button(search, "Add", self._add_app, kind="primary", padx=(self.m.gap_sm, 6))
-        kit.button(search, "Remove", self._remove_app, kind="quiet")
-
-        columns = tk.Frame(apps_box, bg=pal.panel)
-        columns.pack(fill="both", expand=True, pady=(self.m.gap_sm, 0))
-        left = tk.Frame(columns, bg=pal.panel)
-        left.pack(side="left", fill="both", expand=True)
-        kit.label(left, "installed", bg=pal.panel, fg=pal.faint, size=SIZE_TINY, anchor="w").pack(
-            fill="x"
-        )
-        self.match_list = kit.listbox(left, height=6)
-        self.match_list.pack(fill="both", expand=True)
-        self.match_list.bind("<Double-Button-1>", lambda _e: self._add_app())
-        right = tk.Frame(columns, bg=pal.panel)
-        right.pack(side="left", fill="both", expand=True, padx=(self.m.gap_sm, 0))
-        kit.label(
-            right, "this profile opens", bg=pal.panel, fg=pal.faint, size=SIZE_TINY, anchor="w"
-        ).pack(fill="x")
-        self.chosen_list = kit.listbox(right, height=6)
-        self.chosen_list.pack(fill="both", expand=True)
-
         extras = kit.frame(outer)
-        extras.pack(fill="x", pady=(self.m.gap, 0))
+        extras.columnconfigure(0, minsize=LABEL_COLUMN)
         extras.columnconfigure(1, weight=1)
-        kit.label(extras, "Pages to open (one per line)", size=SIZE_SMALL, anchor="nw").grid(
-            row=0, column=0, sticky="nw", pady=3
+        kit.label(extras, "Pages", size=SIZE_SMALL, fg=pal.muted, anchor="nw").grid(
+            row=0, column=0, sticky="nw", pady=(m.gap_xs + 4, m.gap_xs), padx=(0, m.gap_lg)
         )
-        self.urls = tk.Text(
-            extras,
-            height=3,
-            bg=pal.field_bg,
-            fg=pal.fg,
-            insertbackground=pal.accent,
-            relief="flat",
-            font=kit.fm(SIZE_SMALL),
-            highlightthickness=1,
-            highlightbackground=pal.field_border,
+        self.urls = kit.text_field(extras, height=2)
+        self.urls.grid(row=0, column=1, sticky="ew", pady=m.gap_xs)
+        kit.label(extras, "One address per line.", fg=pal.faint, size=SIZE_TINY, anchor="w").grid(
+            row=1, column=1, sticky="w"
         )
-        self.urls.grid(row=0, column=1, sticky="ew", pady=3)
-        kit.label(extras, "Close first (comma separated)", size=SIZE_SMALL, anchor="w").grid(
-            row=1, column=0, sticky="w", pady=3
+        kit.label(extras, "Close first", size=SIZE_SMALL, fg=pal.muted, anchor="w").grid(
+            row=2, column=0, sticky="w", pady=m.gap_xs, padx=(0, m.gap_lg)
         )
-        self.close = kit.entry(extras, "", width=46, mono=False)
-        self.close.grid(row=1, column=1, sticky="ew", pady=3)
+        self.close = kit.entry(extras, "", width=40, placeholder="process names, e.g. slack, steam")
+        self.close.grid(row=2, column=1, sticky="ew", pady=(m.gap_sm, m.gap_xs))
 
         toggles = kit.frame(outer)
-        toggles.pack(fill="x", pady=(self.m.gap_sm, 0))
+        # The fixed-height parts are packed from the bottom up before the
+        # applications card, which takes whatever height is left.
+        toggles.pack(fill="x", side="bottom", pady=(m.gap, 0))
+        extras.pack(fill="x", side="bottom", pady=(m.gap_lg, 0))
         self.tile = kit.checkbox(toggles, "Tile the first two windows side by side", value=True)
-        self.tile.pack(anchor="w")
+        self.tile.pack(anchor="w", pady=1)
         self.make_default = kit.checkbox(toggles, "Make this the default profile", value=False)
-        self.make_default.pack(anchor="w")
-        self.notify_stop = kit.checkbox(toggles, "Notify when it is stopped", value=False)
-        self.notify_stop.pack(anchor="w")
+        self.make_default.pack(anchor="w", pady=1)
+        self.notify_stop = kit.checkbox(toggles, "Notify me when it is stopped", value=False)
+        self.notify_stop.pack(anchor="w", pady=1)
+
+        apps_box = kit.frame(outer)
+        apps_box.pack(fill="both", expand=True)
+        kit.section_label(apps_box, "Applications it opens")
+        search = kit.frame(apps_box)
+        search.pack(fill="x")
+        kit.button(
+            search,
+            "Add",
+            self._add_app,
+            kind="primary",
+            icon="plus",
+            side="right",
+            padx=(m.gap_sm, 0),
+        )
+        self.app_query = kit.search_field(search, "Search, or type a command")
+        self.app_query.field.pack(side="left", fill="x", expand=True)  # type: ignore[attr-defined]
+        self.app_query.bind("<KeyRelease>", self._on_app_key)
+        self.app_query.bind("<Return>", lambda _e: self._add_app())
+        self.app_query.bind("<Down>", lambda _e: self.match_list.move(1))
+        self.app_query.bind("<Up>", lambda _e: self.match_list.move(-1))
+
+        columns = kit.frame(apps_box)
+        columns.pack(fill="both", expand=True, pady=(m.gap_sm, 0))
+        columns.columnconfigure((0, 1), weight=1, uniform="apps")
+        columns.rowconfigure(1, weight=1)
+        kit.label(columns, "Found", fg=pal.faint, size=SIZE_TINY, anchor="w").grid(
+            row=0, column=0, sticky="w", pady=(0, m.gap_xs)
+        )
+        opens = kit.frame(columns)
+        opens.grid(row=0, column=1, sticky="ew", padx=(m.gap, 0), pady=(0, m.gap_xs))
+        kit.label(opens, "Added", fg=pal.faint, size=SIZE_TINY, anchor="w").pack(side="left")
+        self.match_list = kit.rows(
+            columns,
+            empty="Type above to search.",
+            on_activate=lambda _i: self._add_app(),
+            height=110,
+        )
+        self.match_list.grid(row=1, column=0, sticky="nsew")
+        chosen = kit.frame(columns)
+        chosen.grid(row=1, column=1, sticky="nsew", padx=(m.gap, 0))
+        self.chosen_list = kit.rows(
+            chosen,
+            empty="Nothing added yet.",
+            on_activate=lambda _i: self._remove_app(),
+            height=110,
+        )
+        self.chosen_list.pack(fill="both", expand=True)
+        kit.button(
+            opens,
+            "",
+            self._remove_app,
+            kind="quiet",
+            icon="trash",
+            tip="Remove the selected app",
+            side="right",
+            padx=0,
+        )
 
         self.root.bind("<Escape>", lambda _e: self.root.destroy())
 
     # ── preset and app pickers ───────────────────────────────────────────
     def _apply_preset(self, item: scaffold.Preset) -> None:
-        if not self.fields["name"].var.get().strip():
-            self.fields["name"].var.set(item.title)
-        self.fields["description"].var.set(item.description)
+        """Fill the form from a preset. A name the user typed is kept; one a
+        previous preset filled in is replaced with this one's."""
+        blank = item.key == scaffold.PRESETS[0].key
+        name = self.fields["name"].var.get().strip()
+        if not name or name == self._auto_name:
+            self._auto_name = "" if blank else item.title
+            self.fields["name"].var.set(self._auto_name)
+        self.fields["description"].var.set("" if blank else item.description)
         self.fields["tags"].var.set(", ".join(item.tags))
         self.close.var.set(", ".join(item.close))
+
+    def _on_app_key(self, event: tk.Event) -> None:
+        if event.keysym not in ("Up", "Down", "Return"):
+            self._search_apps()
 
     def _search_apps(self) -> None:
         from launcher import apps
 
         query = self.app_query.var.get().strip()
-        self.matches = [app.name for app in apps.search(query, limit=12)] if query else []
-        self.match_list.delete(0, "end")
-        for name in self.matches:
-            self.match_list.insert("end", f"  {name}")
-        if not self.matches:
-            self.match_list.insert("end", "  type to find installed applications")
+        found = apps.search(query, limit=12) if query else []
+        self.matches = [app.name for app in found]
+        self.match_list.set_rows(
+            [ui.ListRow(title=app.name, detail=apps.describe(app)) for app in found]
+        )
 
     def _add_app(self) -> None:
         selection = self.match_list.curselection()
@@ -328,7 +383,7 @@ class _Wizard(_Base):
             return
         if name not in self.chosen_apps:
             self.chosen_apps.append(name)
-            self.chosen_list.insert("end", f"  {name}")
+            self._show_chosen(len(self.chosen_apps) - 1)
         self.app_query.var.set("")
         self._search_apps()
 
@@ -337,8 +392,13 @@ class _Wizard(_Base):
         if not selection:
             return
         index = selection[0]
-        self.chosen_list.delete(index)
         del self.chosen_apps[index]
+        self._show_chosen(index)
+
+    def _show_chosen(self, select: int) -> None:
+        self.chosen_list.set_rows(
+            [ui.ListRow(title=name) for name in self.chosen_apps], select=select
+        )
 
     # ── creation ─────────────────────────────────────────────────────────
     def draft(self) -> scaffold.Draft:
@@ -404,109 +464,159 @@ class _Editor(_Base):
 
     # ── layout ───────────────────────────────────────────────────────────
     def _build(self) -> None:
-        kit, pal = self.kit, self.pal
-        top = kit.frame(self.root, padx=self.m.gap_lg, pady=self.m.gap)
+        kit, pal, m = self.kit, self.pal, self.m
+        top = kit.frame(self.root, padx=m.gap_xl, pady=m.gap_lg)
         top.pack(fill="x")
-        kit.brand(top, 20).pack(side="left", padx=(0, self.m.gap_sm))
-        kit.label(top, self.path.name, size=SIZE_TITLE, bold=True).pack(side="left")
+        kit.button(top, "Save", self._save, kind="primary", side="right", padx=0)
+        kit.button(top, "Close", self.root.destroy, kind="quiet", side="right", padx=(0, m.gap_sm))
+        title = kit.frame(top)
+        title.pack(side="left", fill="x", expand=True)
+        kit.label(
+            title,
+            str(self.data.get("name") or self.path.stem),
+            size=SIZE_TITLE,
+            bold=True,
+            anchor="w",
+        ).pack(fill="x")
+        location = kit.label(title, "", fg=pal.faint, size=SIZE_TINY, mono=True, anchor="w")
+        location.pack(fill="x", pady=(2, 0))
+        kit.elide(location, str(self.path))
+        tk.Frame(self.root, bg=pal.border, height=1).pack(fill="x")
 
-        kit.button(top, "Close", self.root.destroy, kind="quiet", pack=False).pack(side="right")
-        kit.button(top, "Save", self._save, kind="primary", pack=False).pack(
-            side="right", padx=(0, self.m.gap_sm)
-        )
-
-        self.section_var = tk.StringVar(value="steps")
-        kit.segmented(
-            top,
-            (("Steps", "steps"), ("Teardown", "teardown")),
-            self.section_var,
-            self._switch_section,
-        ).pack(side="right", padx=self.m.gap_lg)
-
+        footer = kit.frame(self.root, padx=m.gap_xl, pady=m.gap_sm)
+        footer.pack(fill="x", side="bottom")
         self.hint = kit.label(
-            self.root,
-            "Saving rewrites the file — YAML comments are not preserved.",
+            footer,
+            "Saving rewrites the file, so YAML comments are not kept.",
             fg=pal.faint,
             size=SIZE_TINY,
             anchor="w",
-            padx=self.m.gap_lg,
-            pady=self.m.gap_sm,
         )
-        self.hint.pack(fill="x", side="bottom")
+        self.hint.pack(fill="x")
+        tk.Frame(self.root, bg=pal.border, height=1).pack(fill="x", side="bottom")
 
-        columns = kit.frame(self.root, padx=self.m.gap_lg, pady=self.m.gap_sm)
+        columns = kit.frame(self.root)
         columns.pack(fill="both", expand=True)
 
-        left = kit.frame(columns, width=330)
-        left.pack(side="left", fill="both")
+        left = tk.Frame(columns, bg=pal.panel, width=340, padx=m.gap_lg, pady=m.gap_lg)
+        left.pack(side="left", fill="y")
         left.pack_propagate(False)
+        tk.Frame(columns, bg=pal.border, width=1).pack(side="left", fill="y")
 
-        self.listbox = kit.listbox(left, height=18)
+        self.section_var = tk.StringVar(value="steps")
+        kit.segmented(
+            left,
+            (("Steps", "steps"), ("Teardown", "teardown")),
+            self.section_var,
+            self._switch_section,
+        ).pack(anchor="w", pady=(0, m.gap))
+
+        buttons = tk.Frame(left, bg=pal.panel)
+        buttons.pack(fill="x", side="bottom", pady=(m.gap, 0))
+        kit.button(buttons, "Add step", self._add_step, icon="plus")
+        kit.button(
+            buttons,
+            "",
+            self._remove_step,
+            kind="quiet",
+            icon="trash",
+            tip="Remove this step",
+            side="right",
+            padx=0,
+        )
+        kit.button(
+            buttons,
+            "",
+            lambda: self._move_step(1),
+            kind="quiet",
+            icon="arrow-down",
+            tip="Move down",
+            side="right",
+            padx=(0, m.gap_xs),
+        )
+        kit.button(
+            buttons,
+            "",
+            lambda: self._move_step(-1),
+            kind="quiet",
+            icon="arrow-up",
+            tip="Move up",
+            side="right",
+            padx=(0, m.gap_xs),
+        )
+
+        self.listbox = kit.rows(
+            left, empty="No steps yet.", on_select=self._on_select, mono_detail=True
+        )
         self.listbox.pack(fill="both", expand=True)
-        self.listbox.bind("<<ListboxSelect>>", self._on_select)
 
-        buttons = kit.frame(left, pady=self.m.gap_sm)
-        buttons.pack(fill="x")
-        kit.button(buttons, "+ Add", self._add_step, kind="primary")
-        kit.button(buttons, "− Remove", self._remove_step, kind="danger")
-        kit.button(buttons, "↑", lambda: self._move_step(-1), kind="quiet")
-        kit.button(buttons, "↓", lambda: self._move_step(1), kind="quiet")
-
-        holder = kit.frame(columns, padx=self.m.gap_lg)
+        holder = kit.frame(columns, padx=m.gap_xl, pady=m.gap_lg)
         holder.pack(side="left", fill="both", expand=True)
         # The form outgrows the window on a step with every option set, so the
         # right-hand column scrolls rather than losing its last rows.
         right = kit.scrollable(holder, self.root)
 
         self.profile_box = kit.frame(right)
-        self.profile_box.pack(fill="x", pady=(0, self.m.gap_sm))
+        self.profile_box.pack(fill="x")
         self._build_profile_fields()
 
-        kit.divider(right, pady=(self.m.gap_sm, self.m.gap_sm))
         self.form = kit.frame(right)
         self.form.pack(fill="both", expand=True)
 
     def _build_profile_fields(self) -> None:
         kit = self.kit
-        kit.section_label(self.profile_box, "profile")
+        label = kit.section_label(self.profile_box, "Profile")
+        label.pack_configure(pady=(0, self.m.gap_sm))
         grid = kit.frame(self.profile_box)
         grid.pack(fill="x")
-        grid.columnconfigure(1, weight=1)
         self.profile_widgets: dict[str, Any] = {}
-        for row, (key, label, kind) in enumerate(PROFILE_FIELDS):
-            kit.label(grid, label, size=SIZE_SMALL, anchor="w", width=26).grid(
-                row=row, column=0, sticky="w", pady=1
-            )
-            widget = self._make_widget(grid, kind, self.data.get(key))
-            widget.grid(row=row, column=1, sticky="ew", pady=1)
+        for row, (key, text, kind) in enumerate(PROFILE_FIELDS):
+            widget = self._form_row(grid, row, text, kind, self.data.get(key))
             self.profile_widgets[key] = (widget, kind)
 
-    def _make_widget(self, parent: tk.Widget, kind: str, value: Any) -> tk.Widget:
-        kit, pal = self.kit, self.pal
+    def _form_row(self, grid: tk.Widget, row: int, text: str, kind: str, value: Any) -> tk.Widget:
+        """One labelled field. A bracketed note in the label becomes the
+        field's placeholder, or — for a checkbox — quiet text beside it."""
+        kit, pal, m = self.kit, self.pal, self.m
+        grid.columnconfigure(1, weight=1)
+        name, note = ui.split_hint(text)
+        if kind == "bool":
+            holder = kit.frame(grid)
+            holder.grid(row=row, column=1, sticky="w", pady=m.gap_xs)
+            widget = kit.checkbox(holder, name, value=bool(value))
+            widget.pack(side="left")
+            if note:
+                kit.label(holder, note, fg=pal.faint, size=SIZE_TINY).pack(
+                    side="left", padx=(m.gap_sm, 0)
+                )
+            return widget
+        multiline = kind in ("text", "dict")
+        kit.label(grid, name, fg=pal.muted, size=SIZE_SMALL, anchor="nw", width=18).grid(
+            row=row, column=0, sticky="nw", pady=(m.gap_xs + 7, m.gap_xs), padx=(0, m.gap)
+        )
+        widget = self._make_widget(grid, kind, value, note)
+        widget.grid(
+            row=row, column=1, sticky="ew" if multiline or kind != "choice" else "w", pady=m.gap_xs
+        )
+        return widget
+
+    def _make_widget(self, parent: tk.Widget, kind: str, value: Any, note: str = "") -> tk.Widget:
+        kit = self.kit
         if kind == "bool":
             return kit.checkbox(parent, value=bool(value))
         if kind.startswith("choice:"):
             options = kind.split(":", 1)[1].split(",")
             return kit.choice(parent, str(value) if value else options[0], options)
         if kind in ("text", "dict"):
-            widget = tk.Text(
-                parent,
-                height=5,
-                bg=pal.field_bg,
-                fg=pal.fg,
-                relief="flat",
-                insertbackground=pal.accent,
-                font=kit.fm(SIZE_SMALL),
-                highlightthickness=1,
-                highlightbackground=pal.field_border,
-            )
+            widget = kit.text_field(parent, height=5 if kind == "text" else 4)
+            widget.configure(wrap="none")
             content = (
                 _format_pairs(value) if kind == "dict" else ("" if value is None else str(value))
             )
             widget.insert("1.0", content)
             return widget
         text = _format_list(value) if kind == "list" else ("" if value is None else str(value))
-        return kit.entry(parent, text, width=40)
+        return kit.entry(parent, text, width=40, placeholder=note)
 
     def _widget_value(self, widget: tk.Widget, kind: str) -> Any:
         if kind == "bool":
@@ -543,25 +653,31 @@ class _Editor(_Base):
         self._refresh_list()
 
     def _refresh_list(self) -> None:
-        self.listbox.delete(0, "end")
+        rows = []
         for index, raw in enumerate(self.steps):
             try:
-                summary = describe_step(_coerce_step(raw))[:44]
+                summary = describe_step(_coerce_step(raw))
             except ValueError:
-                summary = "(invalid)"
-            label = raw.get("name") or raw.get("type", "?")
-            self.listbox.insert("end", f"{index + 1:>2}. {label[:18]:<18} {summary}")
+                summary = "invalid step"
+            rows.append(
+                ui.ListRow(
+                    title=str(raw.get("name") or raw.get("type", "step")),
+                    detail=summary,
+                    lead=str(index + 1),
+                    tags=("off",) if raw.get("enabled") is False else (),
+                    dimmed=raw.get("enabled") is False,
+                )
+            )
         if self.steps:
             self.selected = min(self.selected, len(self.steps) - 1)
-            self.listbox.selection_set(self.selected)
+        self.listbox.set_rows(rows, select=self.selected if self.steps else None)
         self._build_form()
 
-    def _on_select(self, _event=None) -> None:
-        selection = self.listbox.curselection()
-        if not selection or selection[0] == self.selected:
+    def _on_select(self, index: int) -> None:
+        if index == self.selected:
             return
         self._commit_form()
-        self.selected = selection[0]
+        self.selected = index
         self._build_form()
 
     def _add_step(self) -> None:
@@ -591,42 +707,52 @@ class _Editor(_Base):
 
     # ── step form ────────────────────────────────────────────────────────
     def _build_form(self) -> None:
-        kit = self.kit
+        kit, pal, m = self.kit, self.pal, self.m
         for child in self.form.winfo_children():
             child.destroy()
         self.widgets.clear()
+        title = "Teardown step" if self.section == "teardown" else "Step"
         if not self.steps:
+            kit.section_label(self.form, title)
             kit.label(
-                self.form, "No steps yet — press “+ Add”.", fg=self.pal.muted, size=SIZE_BODY
-            ).pack(pady=24)
+                self.form,
+                "Nothing here yet. Add a step to start.",
+                fg=pal.muted,
+                size=SIZE_SMALL,
+                anchor="w",
+            ).pack(fill="x")
             return
 
         step = self.steps[self.selected]
         step_type = str(step.get("type", "app"))
+        kit.section_label(self.form, f"{title} {self.selected + 1}")
 
         head = kit.frame(self.form)
-        head.pack(fill="x", pady=(0, self.m.gap_sm))
-        kit.label(head, "Type", size=SIZE_SMALL, width=26, anchor="w").pack(side="left")
-        self.type_var = tk.StringVar(value=step_type)
+        head.pack(fill="x", pady=(0, m.gap_xs))
+        kit.label(head, "Type", fg=pal.muted, size=SIZE_SMALL, anchor="w", width=18).pack(
+            side="left", padx=(0, m.gap)
+        )
         menu = kit.choice(head, step_type, sorted(KNOWN_STEP_TYPES), command=self._change_type)
         self.type_var = menu.var  # type: ignore[attr-defined]
         menu.pack(side="left")
         if step_type == "app":
-            kit.button(head, "Choose app…", self._choose_app, kind="quiet")
+            kit.button(
+                head,
+                "Choose app",
+                self._choose_app,
+                kind="quiet",
+                icon="search",
+                padx=(m.gap_sm, 0),
+            )
 
-        rows = [("name", "Name", "str"), ("id", "Id (for depends_on)", "str")]
+        rows = [("name", "Name", "str"), ("id", "Id (referenced by depends_on)", "str")]
         rows += FIELDS.get(step_type, [])
         rows += _COMMON_TAIL
 
         grid = kit.frame(self.form)
         grid.pack(fill="both", expand=True)
-        grid.columnconfigure(1, weight=1)
         for row, (key, label, kind) in enumerate(rows):
-            kit.label(grid, label, size=SIZE_SMALL, anchor="nw", width=26).grid(
-                row=row, column=0, sticky="nw", pady=2
-            )
-            widget = self._make_widget(grid, kind, self._step_value(step, key, kind))
-            widget.grid(row=row, column=1, sticky="ew", pady=2)
+            widget = self._form_row(grid, row, label, kind, self._step_value(step, key, kind))
             self.widgets[key] = (widget, kind)
 
     @staticmethod
@@ -723,7 +849,8 @@ class _Editor(_Base):
             messagebox.showerror("Could not save", str(exc), parent=self.root)
             return
         self.saved = True
-        self.hint.configure(text=f"Saved {self.path}", fg=self.pal.ok)
+        self.hint.configure(text=f"Saved {self.path.name}", fg=self.pal.ok)
+        self._refresh_list()
 
 
 def open_editor(path: Path, parent: tk.Misc | None = None) -> bool:
