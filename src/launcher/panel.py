@@ -238,7 +238,6 @@ class _Panel:
             self.content,
             "Launch",
             "Type a profile name to run the whole context, or an app name to open just that one.",
-            icon=NAV_ICONS["Launch"],
         )
 
         search = kit.frame(self.content)
@@ -360,7 +359,6 @@ class _Panel:
             self.content,
             "Profiles",
             "Everything `palaunch list / run / stop / edit` does.",
-            icon=NAV_ICONS["Profiles"],
         )
         self.profile_list = kit.listbox(self.content, height=13)
         self.profile_list.pack(fill="both", expand=True)
@@ -575,7 +573,6 @@ class _Panel:
             self.content,
             "Sync",
             "Two ways to carry the profiles directory between machines.",
-            icon=NAV_ICONS["Sync"],
         )
 
         git_card = kit.card(self.content)
@@ -590,8 +587,7 @@ class _Panel:
             form, 0, "Remote URL", model.settings.load().sync_remote, width=52
         )
         self.sync_message = self._labelled_entry(form, 1, "Commit message", "", width=52)
-        self.sync_push = kit.checkbox(form, "Push after committing", value=True)
-        self.sync_push.configure(bg=self.pal.panel, activebackground=self.pal.panel)
+        self.sync_push = kit.checkbox(form, "Push after committing", value=True, bg=self.pal.panel)
         self.sync_push.grid(row=2, column=1, sticky="w", pady=3)
 
         git_buttons = tk.Frame(git, bg=self.pal.panel)
@@ -622,11 +618,11 @@ class _Panel:
         )
         options = tk.Frame(mirror_form, bg=self.pal.panel)
         options.grid(row=1, column=1, sticky="w", pady=3)
-        self.mirror_delete = kit.checkbox(options, "Delete extra files", value=True)
-        self.mirror_delete.configure(bg=self.pal.panel, activebackground=self.pal.panel)
+        self.mirror_delete = kit.checkbox(
+            options, "Delete extra files", value=True, bg=self.pal.panel
+        )
         self.mirror_delete.pack(side="left", padx=(0, self.m.gap))
-        self.mirror_dry = kit.checkbox(options, "Dry run", value=False)
-        self.mirror_dry.configure(bg=self.pal.panel, activebackground=self.pal.panel)
+        self.mirror_dry = kit.checkbox(options, "Dry run", value=False, bg=self.pal.panel)
         self.mirror_dry.pack(side="left")
 
         mirror_buttons = tk.Frame(mirror, bg=self.pal.panel)
@@ -706,7 +702,6 @@ class _Panel:
             self.content,
             "Activity",
             "What ran, how long it took, and what the log says.",
-            icon=NAV_ICONS["Activity"],
         )
         controls = kit.frame(self.content)
         controls.pack(fill="x", pady=(0, self.m.gap_sm))
@@ -769,7 +764,6 @@ class _Panel:
             self.content,
             "Settings",
             "Written to settings.yaml — the same keys `palaunch config set` writes.",
-            icon=NAV_ICONS["Settings"],
         )
         overridden = model.env_overrides()
         values = model.current_values()
