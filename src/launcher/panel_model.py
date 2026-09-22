@@ -62,15 +62,32 @@ GROUPS: tuple[Group, ...] = (
                 "Dark, light, or follow the desktop.",
                 choices=("dark", "light", "auto"),
             ),
-            Field("hud_width", "HUD width (px)", "int", minimum=420, maximum=3000),
-            Field("hud_height", "HUD height (px)", "int", minimum=300, maximum=3000),
+            Field(
+                "hud_width",
+                "Launcher width",
+                "int",
+                "In pixels, from 420 to 3000.",
+                minimum=420,
+                maximum=3000,
+            ),
+            Field(
+                "hud_height",
+                "Launcher height",
+                "int",
+                "In pixels; the launcher shrinks to fit shorter lists.",
+                minimum=300,
+                maximum=3000,
+            ),
         ),
     ),
     Group(
         "Behaviour",
         (
             Field(
-                "hotkey", "Global hotkey", "str", "Opens the HUD from anywhere, e.g. <alt>+<space>."
+                "hotkey",
+                "Global hotkey",
+                "str",
+                "Opens the launcher from anywhere, e.g. <alt>+<space>.",
             ),
             Field(
                 "notifications", "Desktop notifications", "bool", "Toast when a profile finishes."
@@ -308,6 +325,16 @@ def stats_rows(limit: int = 30, profile: str | None = None) -> list[str]:
             f"{row['max_duration']:>8.2f}"
         )
     return lines
+
+
+def hotkey_pairs() -> list[tuple[str, str]]:
+    """(combination, what it does) for the launcher's own key and each profile's."""
+    from launcher import hotkey
+    from launcher.config import discover_profiles
+
+    pairs = [(hotkey.default_combo(), "Open the launcher")]
+    pairs += [(p.hotkey, f"Run {p.name}") for p in discover_profiles() if p.hotkey]
+    return pairs
 
 
 def hotkey_rows() -> list[str]:
