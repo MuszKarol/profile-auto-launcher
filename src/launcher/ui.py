@@ -1085,6 +1085,7 @@ class RowList(tk.Frame):
             self.canvas.bind(sequence, handler)
         self._bind_wheel(self.canvas)
         self._bind_wheel(self.inner)
+        self.set_rows([])
 
     # ── listbox-shaped API ───────────────────────────────────────────────
     def set_rows(self, rows: Sequence[ListRow], select: int | None = 0) -> None:
