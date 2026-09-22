@@ -167,20 +167,7 @@ class _Installer:
             (self.shortcut, "Add a menu shortcut"),
             (self.samples, "Copy the sample profiles"),
         ):
-            box = tk.Checkbutton(
-                inner,
-                text=label,
-                variable=variable,
-                bg=self.pal.panel,
-                fg=self.pal.fg,
-                selectcolor=self.pal.field_bg,
-                activebackground=self.pal.panel,
-                activeforeground=self.pal.fg,
-                font=kit.f(SIZE_SMALL),
-                highlightthickness=0,
-                borderwidth=0,
-                anchor="w",
-            )
+            box = kit.checkbox(inner, label, variable=variable, bg=self.pal.panel)
             box.pack(fill="x", pady=3)
 
         kit.button(self.footer, "Back", self._show_welcome, kind="quiet")
