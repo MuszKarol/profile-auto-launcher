@@ -40,10 +40,11 @@ class _Installer:
         self.root.geometry("620x520")
         self.root.resizable(False, False)
 
-        self.body = self.kit.frame(self.root, padx=self.m.gap_xl, pady=self.m.gap_xl)
-        self.body.pack(fill="both", expand=True)
         self.footer = self.kit.frame(self.root, padx=self.m.gap_xl, pady=self.m.gap)
         self.footer.pack(fill="x", side="bottom")
+        tk.Frame(self.root, bg=self.pal.border, height=1).pack(fill="x", side="bottom")
+        self.body = self.kit.frame(self.root, padx=self.m.gap_xl, pady=self.m.gap_xl)
+        self.body.pack(fill="both", expand=True)
 
         self.target = tk.StringVar(value=str(ops.default_target()))
         self.autostart = tk.BooleanVar(value=True)
@@ -61,12 +62,32 @@ class _Installer:
     def _header(self, title: str, subtitle: str) -> None:
         kit = self.kit
         head = kit.frame(self.body)
-        head.pack(fill="x", pady=(0, self.m.gap_lg))
-        kit.brand(head, 40).pack(side="left", padx=(0, self.m.gap))
+        head.pack(fill="x", pady=(0, self.m.gap_xl))
+        kit.brand(head, 36).pack(side="left", padx=(0, self.m.gap_lg))
         text = kit.frame(head)
         text.pack(side="left", fill="x", expand=True)
         kit.label(text, title, size=SIZE_DISPLAY, bold=True, anchor="w").pack(fill="x")
-        kit.label(text, subtitle, fg=self.pal.muted, size=SIZE_SMALL, anchor="w").pack(fill="x")
+        kit.label(text, subtitle, fg=self.pal.muted, size=SIZE_SMALL, anchor="w").pack(
+            fill="x", pady=(2, 0)
+        )
+
+    def _item(self, parent: tk.Widget, text: str, icon: str = "check") -> None:
+        """One line of a list of things setup does, marked with an icon."""
+        row = tk.Frame(parent, bg=self.pal.panel)
+        row.pack(fill="x", pady=4)
+        self.kit.icon(row, icon, 14, self.pal.faint, self.pal.panel).pack(
+            side="left", anchor="n", pady=2, padx=(0, self.m.gap)
+        )
+        self.kit.label(
+            row,
+            text,
+            bg=self.pal.panel,
+            fg=self.pal.fg,
+            size=SIZE_SMALL,
+            anchor="w",
+            justify="left",
+            wraplength=480,  # a config path is one long word; it has to break
+        ).pack(side="left", fill="x", expand=True)
 
     # ── page 1: welcome ──────────────────────────────────────────────────
     def _show_welcome(self) -> None:
@@ -76,115 +97,97 @@ class _Installer:
             self._header(
                 "Uninstall", "Removes what setup created. Your profiles and settings stay."
             )
-            card = kit.card(self.body)
-            card.pack(fill="both", expand=True)
+            card = kit.card(self.body, pad=self.m.gap_lg)
+            card.pack(fill="x")
             entries = ops.installed_entries()
-            lines = [str(path) for path in entries] or ["nothing to remove — setup never ran here"]
-            for line in lines:
+            kit.card_title(card.inner, "This removes" if entries else "Nothing to remove")
+            for path in entries:
+                self._item(card.inner, str(path), icon="minus")
+            if not entries:
                 kit.label(
                     card.inner,
-                    line,
+                    "Setup has not run for this account.",
                     bg=self.pal.panel,
+                    fg=self.pal.muted,
                     size=SIZE_SMALL,
                     anchor="w",
-                    justify="left",
-                    wraplength=520,
-                ).pack(fill="x", pady=1)
+                ).pack(fill="x")
             kit.button(self.footer, "Cancel", self.root.destroy, kind="quiet")
-            kit.button(
-                self.footer, "Uninstall", self._start, kind="danger", pack=True, side="right"
-            )
+            kit.button(self.footer, "Uninstall", self._start, kind="danger", side="right", padx=0)
             return
 
         self._header(
-            f"Profile Auto Launcher {panel_model.version()}",
-            "Open a whole working context — apps, tabs, services — with one keystroke.",
+            "Profile Auto Launcher",
+            f"Version {panel_model.version()}. Open a whole working context with one keystroke.",
         )
-        card = kit.card(self.body)
-        card.pack(fill="both", expand=True)
-        inner = card.inner
-        kit.label(inner, "This will:", bg=self.pal.panel, size=SIZE_BODY, bold=True).pack(
-            anchor="w", pady=(0, self.m.gap_sm)
-        )
+        card = kit.card(self.body, pad=self.m.gap_lg)
+        card.pack(fill="x")
+        kit.card_title(card.inner, "Setup will")
         for line in ops.plan(self._options()):
-            kit.label(
-                inner,
-                line,
-                bg=self.pal.panel,
-                fg=self.pal.muted,
-                size=SIZE_SMALL,
-                anchor="w",
-                justify="left",
-                wraplength=500,  # a config path is one long word; it has to break
-            ).pack(fill="x", pady=3)
+            self._item(card.inner, line)
         kit.label(
-            inner,
-            "\nNothing outside your user account is touched — no administrator rights needed.",
-            bg=self.pal.panel,
+            self.body,
+            "Nothing outside your user account is touched, so no administrator rights are needed.",
             fg=self.pal.faint,
             size=SIZE_TINY,
             anchor="w",
             justify="left",
-        ).pack(fill="x")
+        ).pack(fill="x", pady=(self.m.gap, 0))
 
         kit.button(self.footer, "Cancel", self.root.destroy, kind="quiet")
         # side="right" stacks right-to-left, so the primary action is packed
         # first to end up in the far corner where it belongs.
-        kit.button(self.footer, "Install", self._start, kind="primary", pack=True, side="right")
-        kit.button(self.footer, "Options", self._show_options, pack=True, side="right")
+        kit.button(self.footer, "Install", self._start, kind="primary", side="right", padx=0)
+        kit.button(self.footer, "Options", self._show_options, side="right")
 
     # ── page 2: options ──────────────────────────────────────────────────
     def _show_options(self) -> None:
         self._clear()
         kit = self.kit
         self._header("Options", "Everything here can be changed later from the manager.")
-        card = kit.card(self.body)
-        card.pack(fill="both", expand=True)
+        card = kit.card(self.body, pad=self.m.gap_lg)
+        card.pack(fill="x")
         inner = card.inner
 
         if ops.is_frozen():
-            kit.label(inner, "Install location", bg=self.pal.panel, size=SIZE_SMALL).pack(
-                anchor="w"
-            )
+            kit.label(
+                inner, "Install location", bg=self.pal.panel, fg=self.pal.muted, size=SIZE_SMALL
+            ).pack(anchor="w", pady=(0, self.m.gap_xs))
             row = tk.Frame(inner, bg=self.pal.panel)
-            row.pack(fill="x", pady=(2, self.m.gap))
-            entry = kit.entry(row, self.target.get(), width=52)
-            entry.pack(side="left")
+            row.pack(fill="x", pady=(0, self.m.gap_lg))
+            kit.button(
+                row,
+                "Browse",
+                lambda: self._browse(entry),
+                icon="folder",
+                side="right",
+                padx=(self.m.gap_sm, 0),
+            )
+            entry = kit.entry(row, self.target.get(), width=40)
+            entry.pack(side="left", fill="x", expand=True)
             entry.var.trace_add("write", lambda *_: self.target.set(entry.var.get()))
-            kit.button(row, "Browse…", lambda: self._browse(entry), kind="quiet")
         else:
             kit.label(
                 inner,
-                f"Using the installed palaunch at {ops.program()}",
+                f"Uses the installed palaunch at {ops.program()}",
                 bg=self.pal.panel,
                 fg=self.pal.muted,
                 size=SIZE_SMALL,
                 anchor="w",
-            ).pack(fill="x", pady=(0, self.m.gap))
+                justify="left",
+                wraplength=520,
+            ).pack(fill="x", pady=(0, self.m.gap_lg))
 
         for variable, label in (
             (self.autostart, "Start the tray when I log in"),
             (self.shortcut, "Add a menu shortcut"),
             (self.samples, "Copy the sample profiles"),
         ):
-            box = tk.Checkbutton(
-                inner,
-                text=label,
-                variable=variable,
-                bg=self.pal.panel,
-                fg=self.pal.fg,
-                selectcolor=self.pal.field_bg,
-                activebackground=self.pal.panel,
-                activeforeground=self.pal.fg,
-                font=kit.f(SIZE_SMALL),
-                highlightthickness=0,
-                borderwidth=0,
-                anchor="w",
-            )
-            box.pack(fill="x", pady=3)
+            box = kit.checkbox(inner, label, variable=variable, bg=self.pal.panel)
+            box.pack(anchor="w", pady=4)
 
         kit.button(self.footer, "Back", self._show_welcome, kind="quiet")
-        kit.button(self.footer, "Install", self._start, kind="primary", pack=True, side="right")
+        kit.button(self.footer, "Install", self._start, kind="primary", side="right", padx=0)
 
     def _browse(self, entry: tk.Entry) -> None:
         from tkinter import filedialog
@@ -206,13 +209,10 @@ class _Installer:
     def _start(self) -> None:
         self._clear()
         kit = self.kit
-        self._header("Uninstalling…" if self.uninstall else "Installing…", "This takes a moment.")
+        self._header("Uninstalling" if self.uninstall else "Installing", "This takes a moment.")
         self.output = kit.textbox(self.body, height=14)
         self.output.pack(fill="both", expand=True)
-        self.close_button = kit.button(
-            self.footer, "Close", self.root.destroy, kind="quiet", pack=False
-        )
-        self.close_button.pack(side="right")
+        kit.button(self.footer, "Close", self.root.destroy, kind="quiet", side="right", padx=0)
 
         options = self._options()
         uninstalling = self.uninstall
@@ -253,25 +253,44 @@ class _Installer:
         self.root.after(80, self._drain)
 
     def _show_done(self) -> None:
-        kit = self.kit
+        kit, m = self.kit, self.m
         for child in self.footer.winfo_children():
             child.destroy()
-        heading = kit.label(
-            self.body,
-            "Done" if self.notes and "not finish" not in self.notes[0] else "Finished with errors",
-            fg=self.pal.ok,
+        succeeded = bool(self.notes) and "not finish" not in self.notes[0]
+        result = kit.frame(self.body)
+        result.pack(fill="x", pady=(m.gap_lg, 0))
+        kit.icon(result, "check" if succeeded else "close", 18, self.pal.fg).pack(
+            side="left", anchor="n", padx=(0, m.gap)
+        )
+        text = kit.frame(result)
+        text.pack(side="left", fill="x", expand=True)
+        kit.label(
+            text,
+            "Done" if succeeded else "Finished with errors",
             size=SIZE_BODY,
             bold=True,
             anchor="w",
-        )
-        heading.pack(fill="x", pady=(self.m.gap, 0))
+        ).pack(fill="x")
         for note in self.notes:
-            kit.label(self.body, note, fg=self.pal.muted, size=SIZE_SMALL, anchor="w").pack(
-                fill="x"
-            )
-        kit.button(self.footer, "Close", self.root.destroy, kind="quiet")
+            kit.label(
+                text,
+                note,
+                fg=self.pal.muted,
+                size=SIZE_SMALL,
+                anchor="w",
+                justify="left",
+                wraplength=500,
+            ).pack(fill="x", pady=(2, 0))
         if not self.uninstall:
-            kit.button(self.footer, "Open the launcher", self._launch, kind="primary", side="right")
+            kit.button(
+                self.footer,
+                "Open the launcher",
+                self._launch,
+                kind="primary",
+                side="right",
+                padx=0,
+            )
+        kit.button(self.footer, "Close", self.root.destroy, kind="quiet", side="right")
 
     def _launch(self) -> None:
         from launcher.executor import spawn_detached

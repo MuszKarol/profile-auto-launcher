@@ -7,9 +7,9 @@ option, the credential store and the paths). Secrets and paths used to be
 pages of their own; they are configuration, so they live with the settings.
 
 Long-running actions (running a profile, syncing, recording) happen on a
-worker thread and stream into the console at the bottom — Tk is
-single-threaded, so workers only ever push text onto a queue that the UI
-thread drains.
+worker thread and stream into the output pane at the bottom, which opens by
+itself when there is something to read — Tk is single-threaded, so workers
+only ever push text onto a queue that the UI thread drains.
 """
 
 from __future__ import annotations
@@ -26,8 +26,8 @@ from launcher.panel_model import SECTIONS
 from launcher.theme import SIZE_BODY, SIZE_SMALL, SIZE_TINY
 from launcher.ui import Kit
 
-# The only icons in the window: one per navigation entry, repeated on that
-# page's header. Rows, buttons and fields carry text alone.
+# One icon per navigation entry. Page headers carry none: the entry beside
+# them already shows it.
 NAV_ICONS = {
     "Launch": "play",
     "Profiles": "layers",
@@ -62,48 +62,29 @@ class _Panel:
 
     # ── chrome ───────────────────────────────────────────────────────────
     def _build(self) -> None:
-        kit, pal = self.kit, self.pal
-        # Bottom-anchored chrome is packed first: whatever is packed last gets
-        # squeezed off the window when a page is taller than the frame.
-        self.status = tk.Label(
-            self.root,
-            text="Ready.",
-            bg=pal.panel,
-            fg=pal.muted,
-            font=kit.f(SIZE_TINY),
-            anchor="w",
-            padx=self.m.gap_xl,
-            pady=7,
-        )
-        self.status.pack(fill="x", side="bottom")
+        kit, pal, m = self.kit, self.pal, self.m
+        shell = kit.frame(self.root)
+        shell.pack(fill="both", expand=True)
 
-        console_box = tk.Frame(self.root, bg=pal.bg, padx=self.m.gap_xl)
-        console_box.pack(fill="x", side="bottom")
-        kit.divider(console_box, pady=(0, self.m.gap_sm))
-        kit.section_label(console_box, "console")
-        self.console = kit.textbox(console_box, height=6)
-        self.console.pack(fill="x", pady=(0, self.m.gap_sm))
-
-        body = kit.frame(self.root)
-        body.pack(fill="both", expand=True)
-
-        nav = tk.Frame(body, bg=pal.panel, width=196, padx=self.m.gap, pady=self.m.gap_lg)
+        nav = tk.Frame(shell, bg=pal.panel, width=208, padx=m.gap, pady=m.gap_lg)
         nav.pack(side="left", fill="y")
         nav.pack_propagate(False)
+        tk.Frame(shell, bg=pal.border, width=1).pack(side="left", fill="y")
 
-        brand = tk.Frame(nav, bg=pal.panel)
-        brand.pack(fill="x", pady=(0, self.m.gap_lg))
-        kit.brand(brand, 22, bg=pal.panel).pack(side="left", padx=(0, self.m.gap_sm))
+        brand = tk.Frame(nav, bg=pal.panel, padx=m.gap_sm)
+        brand.pack(fill="x", pady=(2, m.gap_xl))
+        kit.brand(brand, 20, bg=pal.panel).pack(side="left", padx=(0, m.gap_sm + 2))
         kit.label(brand, "palaunch", bg=pal.panel, size=SIZE_BODY, bold=True).pack(side="left")
 
         self.nav_buttons: dict[str, tuple[tk.Frame, tk.Canvas, tk.Label]] = {}
         for name in SECTIONS:
-            item = tk.Frame(nav, bg=pal.panel, padx=self.m.gap_sm, pady=8, cursor="hand2")
+            item = tk.Frame(nav, bg=pal.panel, padx=m.gap_sm + 2, pady=7, cursor="hand2")
             item.pack(fill="x", pady=1)
-            glyph = kit.icon(item, NAV_ICONS.get(name, ""), 17, pal.muted, pal.panel)
-            glyph.pack(side="left", padx=(2, self.m.gap_sm))
+            glyph = kit.icon(item, NAV_ICONS.get(name, ""), 16, pal.muted, pal.panel)
+            glyph.configure(cursor="hand2")
+            glyph.pack(side="left", padx=(0, m.gap))
             label = kit.label(
-                item, name, bg=pal.panel, fg=pal.muted, size=SIZE_SMALL, bold=True, anchor="w"
+                item, name, bg=pal.panel, fg=pal.muted, size=SIZE_SMALL, anchor="w", cursor="hand2"
             )
             label.pack(side="left")
             for widget in (item, glyph, label):
@@ -114,15 +95,57 @@ class _Panel:
 
         footer = tk.Frame(nav, bg=pal.panel)
         footer.pack(side="bottom", fill="x")
-        kit.button(footer, "Open launcher", self._open_launcher, kind="ghost", pack=False).pack(
+        kit.button(footer, "Open launcher", self._open_launcher, icon="search", pack=False).pack(
             fill="x"
         )
         kit.label(
-            footer, f"version {model.version()}", bg=pal.panel, fg=pal.faint, size=SIZE_TINY
-        ).pack(anchor="w", pady=(self.m.gap_sm, 0))
+            footer, f"Version {model.version()}", bg=pal.panel, fg=pal.faint, size=SIZE_TINY
+        ).pack(anchor="w", padx=m.gap_sm, pady=(m.gap, 0))
 
-        self.content = tk.Frame(body, bg=pal.bg, padx=self.m.gap_xl, pady=self.m.gap_lg)
-        self.content.pack(side="left", fill="both", expand=True)
+        main = kit.frame(shell)
+        main.pack(side="left", fill="both", expand=True)
+
+        # Bottom-anchored chrome is packed first: whatever is packed last gets
+        # squeezed off the window when a page is taller than the frame.
+        bar = kit.frame(main, padx=m.gap_xl, pady=m.gap_sm)
+        bar.pack(fill="x", side="bottom")
+        self.status = kit.label(bar, "Ready", fg=pal.muted, size=SIZE_TINY, anchor="w")
+        self.status.pack(side="left", fill="x", expand=True)
+        self.console_toggle = kit.button(
+            bar, "Show output", self._toggle_console, kind="quiet", pack=False
+        )
+        self.console_toggle.pack(side="right")
+        kit.button(bar, "Clear", self._clear_console, kind="quiet", pack=False).pack(
+            side="right", padx=(0, m.gap_xs)
+        )
+        tk.Frame(main, bg=pal.border, height=1).pack(fill="x", side="bottom")
+
+        # The output pane opens by itself when something is written to it, and
+        # otherwise stays out of the way of the page above.
+        self.console_box = kit.frame(main, padx=m.gap_xl, pady=m.gap)
+        self.console = kit.textbox(self.console_box, height=7)
+        self.console.pack(fill="both", expand=True)
+        self.console_open = False
+
+        self.content = tk.Frame(main, bg=pal.bg, padx=m.gap_xl, pady=m.gap_xl)
+        self.content.pack(side="top", fill="both", expand=True)
+
+    def _toggle_console(self, show: bool | None = None) -> None:
+        show = not self.console_open if show is None else show
+        if show == self.console_open:
+            return
+        self.console_open = show
+        if show:
+            self.console_box.pack(fill="x", side="bottom", before=self.content)
+        else:
+            self.console_box.pack_forget()
+        caption = self.console_toggle.caption  # type: ignore[attr-defined]
+        caption.configure(text="Hide output" if show else "Show output")
+
+    def _clear_console(self) -> None:
+        self.console.configure(state="normal")
+        self.console.delete("1.0", "end")
+        self.console.configure(state="disabled")
 
     def _hover_nav(self, name: str, entered: bool) -> None:
         """Lift an unselected entry on hover. The selected one never moves."""
@@ -146,7 +169,7 @@ class _Panel:
             icons.recolour(glyph, ink, ground)
         for child in self.content.winfo_children():
             child.destroy()
-        for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+        for sequence in ui.WHEEL_EVENTS:
             self.root.unbind_all(sequence)
         self.widgets.clear()
         {
@@ -184,6 +207,7 @@ class _Panel:
             self.console.configure(state="disabled")
             wrote = True
         if wrote:
+            self._toggle_console(True)
             self.console.see("end")
         while True:
             try:
@@ -233,58 +257,91 @@ class _Panel:
 
     # ── Launch ───────────────────────────────────────────────────────────
     def _build_launch(self) -> None:
-        kit, pal = self.kit, self.pal
-        kit.heading(
+        kit, pal, m = self.kit, self.pal, self.m
+        actions = kit.heading(
             self.content,
             "Launch",
-            "Type a profile name to run the whole context, or an app name to open just that one.",
-            icon=NAV_ICONS["Launch"],
+            "Run a whole profile, or type an application's name to open just that one.",
+        )
+        kit.button(
+            actions,
+            "",
+            self._refresh_apps,
+            kind="quiet",
+            icon="refresh",
+            tip="Scan for installed applications again",
+            padx=0,
         )
 
         search = kit.frame(self.content)
         search.pack(fill="x")
-        self.launch_query = kit.entry(search, "", width=42, mono=False)
-        self.launch_query.pack(side="left", ipady=5)
-        self.launch_query.bind("<KeyRelease>", lambda _e: self._refresh_launch())
+        kit.button(
+            search, "Dry run", lambda: self._launch_selected(dry=True), pack=True, side="right"
+        )
+        kit.button(
+            search,
+            "Launch",
+            self._launch_selected,
+            kind="primary",
+            icon="run",
+            side="right",
+            padx=(m.gap_sm, m.gap_sm),
+        )
+        self.launch_query = kit.search_field(search, "Search profiles and applications")
+        self.launch_query.field.pack(side="left", fill="x", expand=True)  # type: ignore[attr-defined]
+        self.launch_query.bind("<KeyRelease>", self._on_launch_key)
         self.launch_query.bind("<Return>", lambda _e: self._launch_selected())
-        kit.button(search, "Launch", self._launch_selected, kind="primary", padx=(self.m.gap, 8))
-        kit.button(search, "Dry run", lambda: self._launch_selected(dry=True))
-        kit.button(search, "Refresh apps", self._refresh_apps, kind="quiet")
-
-        self.launch_list = kit.listbox(self.content, height=12)
-        self.launch_list.pack(fill="both", expand=True, pady=(self.m.gap, 0))
-        self.launch_list.bind("<Double-Button-1>", lambda _e: self._launch_selected())
+        self.launch_query.bind("<Down>", lambda _e: self.launch_list.move(1))
+        self.launch_query.bind("<Up>", lambda _e: self.launch_list.move(-1))
+        self.launch_query.focus_set()
 
         running = kit.frame(self.content)
-        running.pack(fill="x", pady=(self.m.gap, 0))
-        kit.section_label(running, "running now")
+        running.pack(fill="x", side="bottom", pady=(m.gap, 0))
+        kit.button(running, "Stop all", self._stop_everything, kind="quiet", side="right", padx=0)
+        kit.button(
+            running,
+            "Stop selected",
+            self._stop_launch_selection,
+            kind="danger",
+            icon="stop",
+            side="right",
+            padx=(0, m.gap_sm),
+        )
+        kit.label(running, "Running", size=SIZE_SMALL, bold=True).pack(side="left")
         self.running_label = kit.label(running, "", fg=pal.muted, size=SIZE_SMALL, anchor="w")
-        self.running_label.pack(fill="x")
-        buttons = kit.frame(running)
-        buttons.pack(fill="x", pady=(self.m.gap_sm, 0))
-        kit.button(buttons, "Stop selected", self._stop_launch_selection, kind="danger")
-        kit.button(buttons, "Stop everything", self._stop_everything, kind="quiet")
+        self.running_label.pack(side="left", fill="x", expand=True, padx=(m.gap, m.gap))
+
+        self.launch_list = kit.rows(
+            self.content,
+            empty="Nothing matches. Try part of a profile or application name.",
+            on_activate=lambda _i: self._launch_selected(),
+        )
+        self.launch_list.pack(fill="both", expand=True, pady=(m.gap, 0))
         self._refresh_launch()
+
+    def _on_launch_key(self, event: tk.Event) -> None:
+        if event.keysym not in ("Up", "Down", "Return", "Escape"):
+            self._refresh_launch()
 
     def _refresh_launch(self) -> None:
         query = self.launch_query.var.get().strip()
         self.launch_rows = model.launch_rows(query)
-        self.launch_list.delete(0, "end")
-        for row in self.launch_rows:
-            kind = "profile" if row["kind"] == "profile" else "app"
-            self.launch_list.insert(
-                "end", f"  {kind:<8} {row['name'][:26]:<26} {row['detail'][:58]}"
-            )
-        if self.launch_rows:
-            self.launch_list.selection_set(0)
-        else:
-            self.launch_list.insert("end", "  nothing matches — try part of a name")
+        self.launch_list.set_rows(
+            [
+                ui.ListRow(
+                    title=row["name"],
+                    detail=row["detail"],
+                    tags=() if row["kind"] == "profile" else ("app",),
+                )
+                for row in self.launch_rows
+            ]
+        )
         self._refresh_running()
 
     def _refresh_running(self) -> None:
         lines = model.running_rows()
         self.running_label.configure(
-            text="   ".join(lines) if lines else "nothing the launcher started is running"
+            text=", ".join(lines) if lines else "Nothing the launcher started is running."
         )
 
     def _refresh_apps(self) -> None:
@@ -355,50 +412,105 @@ class _Panel:
 
     # ── Profiles ─────────────────────────────────────────────────────────
     def _build_profiles(self) -> None:
-        kit = self.kit
-        kit.heading(
+        kit, m = self.kit, self.m
+        actions = kit.heading(
             self.content,
             "Profiles",
-            "Everything `palaunch list / run / stop / edit` does.",
-            icon=NAV_ICONS["Profiles"],
+            "Run, stop and edit profiles, or record a new one from the apps you open.",
         )
-        self.profile_list = kit.listbox(self.content, height=13)
+        kit.button(
+            actions,
+            "New profile",
+            self._new_profile,
+            kind="primary",
+            icon="plus",
+            side="right",
+            padx=0,
+        )
+        kit.button(
+            actions,
+            "Record",
+            self._record_profile,
+            icon="record",
+            side="right",
+            padx=(0, m.gap_sm),
+        )
+
+        bar = kit.frame(self.content)
+        bar.pack(fill="x", side="bottom", pady=(m.gap, 0))
+        kit.button(bar, "Run", lambda: self._run_selected(dry=False), kind="primary", icon="run")
+        kit.button(bar, "Dry run", lambda: self._run_selected(dry=True))
+        kit.button(bar, "Edit", self._edit_selected, icon="edit")
+        kit.button(bar, "Switch to", self._switch_selected)
+        kit.button(
+            bar,
+            "",
+            self._refresh_profiles,
+            kind="quiet",
+            icon="refresh",
+            tip="Reload profiles",
+            side="right",
+            padx=0,
+        )
+        kit.button(
+            bar,
+            "",
+            self._open_profiles_dir,
+            kind="quiet",
+            icon="folder",
+            tip="Open the profiles folder",
+            side="right",
+            padx=(0, m.gap_xs),
+        )
+        kit.button(
+            bar,
+            "",
+            self._validate_all,
+            kind="quiet",
+            icon="check",
+            tip="Validate every profile file",
+            side="right",
+            padx=(0, m.gap_xs),
+        )
+        kit.button(
+            bar,
+            "Stop",
+            self._stop_selected,
+            kind="danger",
+            icon="stop",
+            side="right",
+            padx=(0, m.gap),
+        )
+
+        self.profile_list = kit.rows(
+            self.content,
+            empty="No profiles yet. Create one with New profile.",
+            on_activate=lambda _i: self._edit_selected(),
+        )
         self.profile_list.pack(fill="both", expand=True)
-        self.profile_list.bind("<Double-Button-1>", lambda _e: self._edit_selected())
-
-        row1 = kit.frame(self.content, pady=self.m.gap)
-        row1.pack(fill="x")
-        kit.button(row1, "Run", lambda: self._run_selected(dry=False), kind="primary")
-        kit.button(row1, "Dry run", lambda: self._run_selected(dry=True))
-        kit.button(row1, "Stop", self._stop_selected, kind="danger")
-        kit.button(row1, "Switch to", self._switch_selected)
-
-        row2 = kit.frame(self.content)
-        row2.pack(fill="x")
-        kit.button(row2, "New…", self._new_profile, kind="primary")
-        kit.button(row2, "Edit…", self._edit_selected)
-        kit.button(row2, "Record…", self._record_profile)
-        kit.button(row2, "Validate all", self._validate_all, kind="quiet")
-        kit.button(row2, "Open folder", self._open_profiles_dir, kind="quiet")
-        kit.button(row2, "Refresh", self._refresh_profiles, kind="quiet")
         self._refresh_profiles()
 
     def _refresh_profiles(self) -> None:
         self.profile_rows = model.profile_rows()
-        self.profile_list.delete(0, "end")
+        rows = []
         for row in self.profile_rows:
-            marker = "default" if row["default"] else ""
-            running = f"  {row['running']} running" if row["running"] else ""
-            hotkey = f"  [{row['hotkey']}]" if row["hotkey"] else ""
-            self.profile_list.insert(
-                "end",
-                f"  {row['name']:<18} {row['steps']:>2} steps  "
-                f"{row['description'][:34]:<34}{marker:<8}{hotkey}{running}",
+            tags = []
+            if row["running"]:
+                tags.append(f"{row['running']} running")
+            if row["default"]:
+                tags.append("default")
+            if row["hotkey"]:
+                tags.append(ui.pretty_keys(row["hotkey"]))
+            steps = row["steps"]
+            rows.append(
+                ui.ListRow(
+                    title=row["name"],
+                    detail=row["description"],
+                    tags=tuple(tags),
+                    meta=f"{steps} step" if steps == 1 else f"{steps} steps",
+                )
             )
-        if self.profile_rows:
-            self.profile_list.selection_set(0)
-        else:
-            self.profile_list.insert("end", "  no profiles yet — press New")
+        self.profile_list.set_rows(rows)
 
     def _selected_profile(self) -> dict[str, Any] | None:
         selection = self.profile_list.curselection()
@@ -570,83 +682,88 @@ class _Panel:
 
     # ── Sync ─────────────────────────────────────────────────────────────
     def _build_sync(self) -> None:
-        kit = self.kit
+        kit, pal, m = self.kit, self.pal, self.m
         kit.heading(
             self.content,
             "Sync",
-            "Two ways to carry the profiles directory between machines.",
-            icon=NAV_ICONS["Sync"],
+            "Carry the profiles folder between machines, through git or as a plain copy.",
         )
+        stored = model.settings.load()
 
-        git_card = kit.card(self.content)
-        git_card.pack(fill="x")
+        cards = kit.frame(self.content)
+        cards.pack(fill="x")
+        cards.columnconfigure((0, 1), weight=1, uniform="card")
+        cards.rowconfigure(0, weight=1)
+
+        git_card = kit.card(cards, pad=m.gap_lg)
+        git_card.grid(row=0, column=0, sticky="nsew", padx=(0, m.gap_sm))
         git = git_card.inner
-        kit.label(git, "Git repository", bg=self.pal.panel, size=SIZE_BODY, bold=True).pack(
-            anchor="w", pady=(0, self.m.gap_sm)
+        kit.card_title(git, "Git repository", "Commit the folder and push it to a remote.")
+        self.sync_remote = self._stacked_entry(
+            git, "Remote URL", stored.sync_remote, "git@github.com:you/profiles.git"
         )
-        form = tk.Frame(git, bg=self.pal.panel)
-        form.pack(fill="x")
-        self.sync_remote = self._labelled_entry(
-            form, 0, "Remote URL", model.settings.load().sync_remote, width=52
-        )
-        self.sync_message = self._labelled_entry(form, 1, "Commit message", "", width=52)
-        self.sync_push = kit.checkbox(form, "Push after committing", value=True)
-        self.sync_push.configure(bg=self.pal.panel, activebackground=self.pal.panel)
-        self.sync_push.grid(row=2, column=1, sticky="w", pady=3)
+        self.sync_message = self._stacked_entry(git, "Commit message", "", "Update profiles")
+        self.sync_push = kit.checkbox(git, "Push after committing", value=True, bg=pal.panel)
+        self.sync_push.pack(anchor="w", pady=(m.gap_xs, 0))
+        git_buttons = tk.Frame(git, bg=pal.panel)
+        git_buttons.pack(fill="x", side="bottom", pady=(m.gap_lg, 0))
+        kit.button(git_buttons, "Sync now", self._sync_now, kind="primary", icon="sync")
+        kit.button(git_buttons, "Initialise", self._sync_init)
 
-        git_buttons = tk.Frame(git, bg=self.pal.panel)
-        git_buttons.pack(fill="x", pady=(self.m.gap, 0))
-        kit.button(git_buttons, "Sync now", self._sync_now, kind="primary")
-        kit.button(git_buttons, "Initialise repo", self._sync_init)
-        kit.button(git_buttons, "Status", self._sync_status, kind="quiet")
-
-        mirror_card = kit.card(self.content)
-        mirror_card.pack(fill="x", pady=(self.m.gap, 0))
+        mirror_card = kit.card(cards, pad=m.gap_lg)
+        mirror_card.grid(row=0, column=1, sticky="nsew", padx=(m.gap_sm, 0))
         mirror = mirror_card.inner
-        kit.label(mirror, "rsync mirror", bg=self.pal.panel, size=SIZE_BODY, bold=True).pack(
-            anchor="w"
+        kit.card_title(mirror, "Mirror", "Copy to a folder, a drive or user@host:/path with rsync.")
+        self.mirror_target = self._stacked_entry(
+            mirror, "Target", stored.sync_mirror, "/media/usb/profiles"
         )
-        kit.label(
-            mirror,
-            "A folder, a USB stick or user@host:/path. Uses rsync when installed, "
-            "and a built-in mirror for local paths when it is not.",
-            bg=self.pal.panel,
-            fg=self.pal.muted,
-            size=SIZE_TINY,
-            anchor="w",
-        ).pack(fill="x", pady=(2, self.m.gap_sm))
-        mirror_form = tk.Frame(mirror, bg=self.pal.panel)
-        mirror_form.pack(fill="x")
-        self.mirror_target = self._labelled_entry(
-            mirror_form, 0, "Mirror target", model.settings.load().sync_mirror, width=52
-        )
-        options = tk.Frame(mirror_form, bg=self.pal.panel)
-        options.grid(row=1, column=1, sticky="w", pady=3)
-        self.mirror_delete = kit.checkbox(options, "Delete extra files", value=True)
-        self.mirror_delete.configure(bg=self.pal.panel, activebackground=self.pal.panel)
-        self.mirror_delete.pack(side="left", padx=(0, self.m.gap))
-        self.mirror_dry = kit.checkbox(options, "Dry run", value=False)
-        self.mirror_dry.configure(bg=self.pal.panel, activebackground=self.pal.panel)
+        options = tk.Frame(mirror, bg=pal.panel)
+        options.pack(fill="x", pady=(m.gap_xs, 0))
+        self.mirror_delete = kit.checkbox(options, "Delete extra files", value=True, bg=pal.panel)
+        self.mirror_delete.pack(side="left", padx=(0, m.gap_lg))
+        self.mirror_dry = kit.checkbox(options, "Dry run", value=False, bg=pal.panel)
         self.mirror_dry.pack(side="left")
+        mirror_buttons = tk.Frame(mirror, bg=pal.panel)
+        mirror_buttons.pack(fill="x", side="bottom", pady=(m.gap_lg, 0))
+        kit.button(
+            mirror_buttons, "Push", lambda: self._mirror(pull=False), kind="primary", icon="upload"
+        )
+        kit.button(mirror_buttons, "Pull", lambda: self._mirror(pull=True), icon="download")
+        kit.button(
+            mirror_buttons,
+            "Remember target",
+            self._remember_mirror,
+            kind="quiet",
+            side="right",
+            padx=0,
+        )
 
-        mirror_buttons = tk.Frame(mirror, bg=self.pal.panel)
-        mirror_buttons.pack(fill="x", pady=(self.m.gap, 0))
-        kit.button(mirror_buttons, "Push →", lambda: self._mirror(pull=False), kind="primary")
-        kit.button(mirror_buttons, "← Pull", lambda: self._mirror(pull=True))
-        kit.button(mirror_buttons, "Remember target", self._remember_mirror, kind="quiet")
-
-        self.sync_output = kit.textbox(self.content, height=8)
-        self.sync_output.pack(fill="both", expand=True, pady=(self.m.gap, 0))
+        status = kit.frame(self.content)
+        status.pack(fill="x", pady=(m.gap_xl, m.gap_sm))
+        kit.button(
+            status,
+            "",
+            self._sync_status,
+            kind="quiet",
+            icon="refresh",
+            tip="Check again",
+            side="right",
+            padx=0,
+        )
+        kit.label(status, "Repository status", size=SIZE_SMALL, bold=True).pack(side="left")
+        self.sync_output = kit.textbox(self.content, height=6)
+        self.sync_output.pack(fill="both", expand=True)
         self._sync_status()
 
-    def _labelled_entry(
-        self, parent: tk.Widget, row: int, label: str, value: str, width: int = 40
+    def _stacked_entry(
+        self, parent: tk.Widget, label: str, value: str, placeholder: str = ""
     ) -> tk.Entry:
+        """A label over a full-width field — the shape that fits a narrow card."""
         self.kit.label(
-            parent, label, bg=self.pal.panel, size=SIZE_SMALL, width=16, anchor="w"
-        ).grid(row=row, column=0, sticky="w", pady=3)
-        entry = self.kit.entry(parent, value, width=width)
-        entry.grid(row=row, column=1, sticky="w", pady=3)
+            parent, label, bg=ui.ground_of(parent), fg=self.pal.muted, size=SIZE_SMALL, anchor="w"
+        ).pack(fill="x", pady=(0, self.m.gap_xs))
+        entry = self.kit.entry(parent, value, width=10, placeholder=placeholder)
+        entry.pack(fill="x", pady=(0, self.m.gap))
         return entry
 
     def _sync_init(self) -> None:
@@ -697,32 +814,55 @@ class _Panel:
     def _remember_mirror(self) -> None:
         target = self.mirror_target.var.get().strip()
         model.settings.save({"sync_mirror": target})
-        self._set_status(f"Mirror target saved: {target or '(none)'}", self.pal.ok)
+        self._set_status(
+            f"Mirror target saved: {target}" if target else "Mirror target cleared", self.pal.ok
+        )
 
     # ── Activity ─────────────────────────────────────────────────────────
     def _build_activity(self) -> None:
-        kit = self.kit
-        kit.heading(
-            self.content,
-            "Activity",
-            "What ran, how long it took, and what the log says.",
-            icon=NAV_ICONS["Activity"],
+        kit, m = self.kit, self.m
+        actions = kit.heading(
+            self.content, "Activity", "What ran, how long each step took, and what the log says."
         )
+        kit.button(
+            actions, "Clear history", self._clear_history, kind="quiet", side="right", padx=0
+        )
+        kit.button(
+            actions,
+            "",
+            self._open_log_dir,
+            kind="quiet",
+            icon="folder",
+            tip="Open the log folder",
+            side="right",
+            padx=(0, m.gap_xs),
+        )
+
         controls = kit.frame(self.content)
-        controls.pack(fill="x", pady=(0, self.m.gap_sm))
+        controls.pack(fill="x", pady=(0, m.gap))
         self.activity_view = tk.StringVar(value="runs")
         kit.segmented(
             controls,
-            (("Runs", "runs"), ("Step stats", "stats"), ("Log", "log")),
+            (("Runs", "runs"), ("Step timings", "stats"), ("Log", "log")),
             self.activity_view,
             self._refresh_activity,
         ).pack(side="left")
-        kit.label(controls, "  limit", fg=self.pal.muted, size=SIZE_SMALL).pack(side="left")
-        self.activity_limit = kit.entry(controls, "30", width=6)
-        self.activity_limit.pack(side="left", padx=self.m.gap_sm)
-        kit.button(controls, "Refresh", self._refresh_activity, kind="quiet")
-        kit.button(controls, "Clear history", self._clear_history, kind="quiet")
-        kit.button(controls, "Open log folder", self._open_log_dir, kind="quiet")
+        kit.button(
+            controls,
+            "",
+            self._refresh_activity,
+            kind="quiet",
+            icon="refresh",
+            tip="Refresh",
+            side="right",
+            padx=0,
+        )
+        self.activity_limit = kit.entry(controls, "30", width=5)
+        self.activity_limit.pack(side="right", padx=(0, m.gap_sm))
+        self.activity_limit.bind("<Return>", lambda _e: self._refresh_activity())
+        kit.label(controls, "Show last", fg=self.pal.muted, size=SIZE_SMALL).pack(
+            side="right", padx=(0, m.gap_sm)
+        )
 
         self.activity_output = kit.textbox(self.content, height=20)
         self.activity_output.pack(fill="both", expand=True)
@@ -764,59 +904,85 @@ class _Panel:
 
     # ── Settings ─────────────────────────────────────────────────────────
     def _build_settings(self) -> None:
-        kit, pal = self.kit, self.pal
+        kit, pal, m = self.kit, self.pal, self.m
         kit.heading(
             self.content,
             "Settings",
-            "Written to settings.yaml — the same keys `palaunch config set` writes.",
-            icon=NAV_ICONS["Settings"],
+            "Saved to settings.yaml, the same keys `palaunch config set` writes.",
         )
         overridden = model.env_overrides()
         values = model.current_values()
 
-        buttons = kit.frame(self.content, pady=self.m.gap)
-        buttons.pack(fill="x", side="bottom")
-        kit.button(buttons, "Save", self._save_settings, kind="primary")
-        kit.button(buttons, "Restore defaults", self._restore_defaults)
+        buttons = kit.frame(self.content)
+        buttons.pack(fill="x", side="bottom", pady=(m.gap, 0))
+        kit.button(buttons, "Save", self._save_settings, kind="primary", side="right", padx=0)
+        kit.button(
+            buttons, "Restore defaults", self._restore_defaults, side="right", padx=(0, m.gap_sm)
+        )
         kit.button(buttons, "Reload from file", lambda: self._show("Settings"), kind="quiet")
+        tk.Frame(self.content, bg=pal.border, height=1).pack(fill="x", side="bottom")
 
         form = kit.scrollable(self.content, self.root)
-        for group in model.GROUPS:
-            kit.section_label(form, group.title)
-            grid = kit.frame(form)
-            grid.pack(fill="x")
-            grid.columnconfigure(2, weight=1)
-            for row, field in enumerate(group.fields):
-                kit.label(grid, field.label, size=SIZE_SMALL, anchor="w", width=26).grid(
-                    row=row, column=0, sticky="w", pady=3
-                )
-                widget = self._field_widget(grid, field, values[field.key])
-                widget.grid(row=row, column=1, sticky="w", pady=3)
-                self.widgets[field.key] = (widget, field)
-                note = field.help
+        for index, group in enumerate(model.GROUPS):
+            label = kit.section_label(form, group.title)
+            if index == 0:
+                label.pack_configure(pady=(0, m.gap_sm))
+            card = self._settings_card(form)
+            for position, field in enumerate(group.fields):
+                note, tone = field.help, pal.faint
                 if field.key in overridden:
                     note = (
-                        f"forced by ${overridden[field.key]} — the file is ignored while it is set"
+                        f"Set by ${overridden[field.key]}; the file value is ignored while it is."
                     )
-                if note:
-                    kit.label(
-                        grid,
-                        note,
-                        fg=pal.warn if field.key in overridden else pal.faint,
-                        size=SIZE_TINY,
-                        anchor="w",
-                    ).grid(row=row, column=2, sticky="w", padx=(self.m.gap, 0))
+                    tone = pal.warn
+                row = self._settings_row(card, field.label, note, tone, first=position == 0)
+                widget = self._field_widget(row, field, values[field.key])
+                widget.grid(row=0, column=1, rowspan=2, sticky="e")
+                self.widgets[field.key] = (widget, field)
 
         self._build_secrets(form)
         self._build_paths(form)
+        tk.Frame(form, bg=pal.bg, height=m.gap).pack(fill="x")
+
+    def _settings_card(self, parent: tk.Widget) -> tk.Frame:
+        card = self.kit.card(parent, pad=0)
+        card.pack(fill="x")
+        return card.inner
+
+    def _settings_row(
+        self, card: tk.Widget, label: str, note: str = "", tone: str = "", first: bool = False
+    ) -> tk.Frame:
+        """One line of a settings card: the name and a line of help at the
+        left, the control — gridded in by the caller at column 1 — at the right."""
+        pal, m = self.pal, self.m
+        if not first:
+            tk.Frame(card, bg=pal.border, height=1).pack(fill="x", padx=m.pad)
+        row = tk.Frame(card, bg=pal.panel, padx=m.pad, pady=m.gap - 1)
+        row.pack(fill="x")
+        row.columnconfigure(0, weight=1)
+        self.kit.label(row, label, bg=pal.panel, size=SIZE_SMALL, anchor="w").grid(
+            row=0, column=0, sticky="w", padx=(0, m.gap_lg)
+        )
+        if note:
+            self.kit.label(
+                row,
+                note,
+                bg=pal.panel,
+                fg=tone or pal.faint,
+                size=SIZE_TINY,
+                anchor="w",
+                justify="left",
+                wraplength=380,
+            ).grid(row=1, column=0, sticky="w", padx=(0, m.gap_lg), pady=(2, 0))
+        return row
 
     def _field_widget(self, parent: tk.Widget, field: model.Field, value: Any) -> tk.Widget:
         if field.kind == "bool":
-            widget = self.kit.checkbox(parent, value=bool(value))
-            return widget
+            return self.kit.checkbox(parent, value=bool(value), bg=self.pal.panel)
         if field.kind == "choice":
-            return self.kit.choice(parent, str(value), field.choices)
-        return self.kit.entry(parent, "" if value is None else str(value), width=34)
+            return self.kit.choice(parent, str(value), field.choices, width=14)
+        width = 8 if field.kind == "int" else 26
+        return self.kit.entry(parent, "" if value is None else str(value), width=width)
 
     def submitted(self) -> dict[str, Any]:
         """What the settings form currently holds, unvalidated."""
@@ -851,44 +1017,40 @@ class _Panel:
 
     # ── Settings ▸ secrets ───────────────────────────────────────────────
     def _build_secrets(self, parent: tk.Widget) -> None:
-        kit = self.kit
-        kit.section_label(parent, "secrets")
+        kit, pal, m = self.kit, self.pal, self.m
+        kit.section_label(parent, "Secrets")
         from launcher import secrets
 
         if not secrets.available():
-            kit.label(
-                parent,
-                "keyring is not installed — run `pip install profile-auto-launcher[secrets]`",
-                fg=self.pal.warn,
-                size=SIZE_SMALL,
-                anchor="w",
-            ).pack(fill="x")
+            card = self._settings_card(parent)
+            self._settings_row(
+                card,
+                "The keyring package is not installed",
+                "Install it with `pip install profile-auto-launcher[secrets]` to keep "
+                "passwords and tokens in the OS credential store.",
+                first=True,
+            )
             return
         kit.label(
             parent,
-            "Stored in the OS credential store; used as {{ secret.NAME }} in a profile.",
-            fg=self.pal.faint,
+            "Kept in the OS credential store and used as {{ secret.NAME }} in a profile.",
+            fg=pal.faint,
             size=SIZE_TINY,
             anchor="w",
-        ).pack(fill="x", pady=(0, self.m.gap_sm))
-        self.secret_list = kit.listbox(parent, height=5)
+        ).pack(fill="x", pady=(0, m.gap_sm))
+        self.secret_list = kit.rows(parent, empty="No secrets stored yet.", height=120)
         self.secret_list.pack(fill="x")
-        buttons = kit.frame(parent, pady=self.m.gap_sm)
-        buttons.pack(fill="x")
-        kit.button(buttons, "Add…", self._add_secret)
-        kit.button(buttons, "Remove", self._remove_secret, kind="danger")
-        kit.button(buttons, "Refresh", self._refresh_secrets, kind="quiet")
+        buttons = kit.frame(parent)
+        buttons.pack(fill="x", pady=(m.gap_sm, 0))
+        kit.button(buttons, "Add secret", self._add_secret, icon="plus")
+        kit.button(buttons, "Remove", self._remove_secret, kind="danger", icon="trash")
         self._refresh_secrets()
 
     def _refresh_secrets(self) -> None:
         from launcher import secrets
 
         self.secret_names = secrets.list_names()
-        self.secret_list.delete(0, "end")
-        for name in self.secret_names:
-            self.secret_list.insert("end", f"  {name}")
-        if not self.secret_names:
-            self.secret_list.insert("end", "  no secrets stored yet")
+        self.secret_list.set_rows([ui.ListRow(title=name) for name in self.secret_names])
 
     def _add_secret(self) -> None:
         from tkinter import simpledialog
@@ -929,28 +1091,26 @@ class _Panel:
 
     # ── Settings ▸ paths ─────────────────────────────────────────────────
     def _build_paths(self, parent: tk.Widget) -> None:
-        kit = self.kit
-        kit.section_label(parent, "paths and hotkeys")
-        grid = kit.frame(parent)
-        grid.pack(fill="x")
-        for row, (label, value) in enumerate(model.paths_report()):
-            kit.label(grid, label, fg=self.pal.muted, size=SIZE_TINY, width=18, anchor="w").grid(
-                row=row, column=0, sticky="w", pady=2
-            )
-            entry = kit.entry(grid, value, width=64)
-            entry.configure(state="readonly")
-            entry.grid(row=row, column=1, sticky="w", pady=2)
+        kit, pal, m = self.kit, self.pal, self.m
+        kit.section_label(parent, "Hotkeys")
+        card = self._settings_card(parent)
+        for position, (combo, action) in enumerate(model.hotkey_pairs()):
+            row = self._settings_row(card, action, first=position == 0)
+            kit.keycap(row, ui.pretty_keys(combo), bg=pal.panel).grid(row=0, column=1, sticky="e")
 
-        hotkeys = kit.frame(parent)
-        hotkeys.pack(fill="x", pady=(self.m.gap_sm, 0))
-        for line in model.hotkey_rows():
-            kit.label(hotkeys, f"  {line}", mono=True, size=SIZE_TINY, anchor="w").pack(fill="x")
+        kit.section_label(parent, "Files")
+        card = self._settings_card(parent)
+        for position, (label, value) in enumerate(model.paths_report()):
+            row = self._settings_row(card, label, first=position == 0)
+            entry = kit.entry(row, value, width=52)
+            entry.configure(state="readonly", fg=pal.muted)
+            entry.grid(row=0, column=1, sticky="e")
 
-        buttons = kit.frame(parent, pady=self.m.gap)
-        buttons.pack(fill="x")
+        buttons = kit.frame(parent)
+        buttons.pack(fill="x", pady=(m.gap, 0))
+        kit.button(buttons, "Open config folder", self._open_config_dir, icon="folder")
         kit.button(buttons, "Write JSON Schema", self._write_schema)
-        kit.button(buttons, "Open config folder", self._open_config_dir, kind="quiet")
-        kit.button(buttons, "Install / autostart…", self._open_installer, kind="quiet")
+        kit.button(buttons, "Install and autostart", self._open_installer, icon="package")
 
     def _write_schema(self) -> None:
         def job() -> str:
